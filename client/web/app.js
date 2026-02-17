@@ -2321,50 +2321,58 @@ function updatePlayer(dt) {
       }
     }
 
-    if (!player.onGround && map.swim && !player.climbing) {
-      player.swimming = true;
-
+    if (!player.onGround && !player.climbing) {
       let hspeedTick = player.vx / PHYS_TPS;
       let vspeedTick = player.vy / PHYS_TPS;
 
-      let hforceTick = 0;
-      let vforceTick = 0;
-      if (effectiveMove < 0) hforceTick = -PHYS_FLYFORCE;
-      else if (effectiveMove > 0) hforceTick = PHYS_FLYFORCE;
-      if (runtime.input.up && !runtime.input.down) vforceTick = -PHYS_FLYFORCE;
-      else if (runtime.input.down && !runtime.input.up) vforceTick = PHYS_FLYFORCE;
+      if (map.swim) {
+        // ── C++ PlayerFlyState::update (SWIM) ──
+        // Applies flyforce in pressed directions, then move_swimming physics.
+        // FallState::update_state transitions to SWIM when !onground && underwater.
+        player.swimming = true;
 
-      for (let t = 0; t < numTicks; t++) {
-        let hacc = hforceTick;
-        let vacc = vforceTick;
-        hacc -= PHYS_SWIMFRICTION * hspeedTick;
-        vacc -= PHYS_SWIMFRICTION * vspeedTick;
-        vacc += PHYS_SWIMGRAVFORCE;
-        hspeedTick += hacc;
-        vspeedTick += vacc;
+        // PlayerFlyState::update — set hforce/vforce from directional input
+        let hforceTick = 0;
+        let vforceTick = 0;
+        if (runtime.input.left && !runtime.input.right) hforceTick = -PHYS_FLYFORCE;
+        else if (runtime.input.right && !runtime.input.left) hforceTick = PHYS_FLYFORCE;
+        if (runtime.input.up && !runtime.input.down) vforceTick = -PHYS_FLYFORCE;
+        else if (runtime.input.down && !runtime.input.up) vforceTick = PHYS_FLYFORCE;
+
+        // Physics::move_swimming per-tick integration
+        for (let t = 0; t < numTicks; t++) {
+          let hacc = hforceTick;
+          let vacc = vforceTick;
+          hacc -= PHYS_SWIMFRICTION * hspeedTick;
+          vacc -= PHYS_SWIMFRICTION * vspeedTick;
+          vacc += PHYS_SWIMGRAVFORCE;
+          hspeedTick += hacc;
+          vspeedTick += vacc;
+        }
+
+        // Deadzone: stop near-zero speeds when no force applied
+        if (Math.abs(hspeedTick) < PHYS_HSPEED_DEADZONE && hforceTick === 0) hspeedTick = 0;
+        if (Math.abs(vspeedTick) < PHYS_HSPEED_DEADZONE && vforceTick === 0) vspeedTick = 0;
+
+        player.vx = hspeedTick * PHYS_TPS;
+        player.vy = vspeedTick * PHYS_TPS;
+      } else {
+        // ── C++ PlayerFallState::update + move_normal (airborne) ──
+        // Normal gravity, directional air brake only.
+        player.swimming = false;
+
+        for (let t = 0; t < numTicks; t++) {
+          // PlayerFallState::update — counter-directional brake
+          if (effectiveMove < 0 && hspeedTick > 0) hspeedTick -= PHYS_FALL_BRAKE;
+          else if (effectiveMove > 0 && hspeedTick < 0) hspeedTick += PHYS_FALL_BRAKE;
+
+          // Physics::move_normal airborne — only gravity
+          vspeedTick += PHYS_GRAVFORCE;
+        }
+
+        player.vx = hspeedTick * PHYS_TPS;
+        player.vy = Math.min(vspeedTick * PHYS_TPS, PHYS_FALL_SPEED_CAP);
       }
-
-      if (Math.abs(hspeedTick) < PHYS_HSPEED_DEADZONE && hforceTick === 0) hspeedTick = 0;
-      if (Math.abs(vspeedTick) < PHYS_HSPEED_DEADZONE && vforceTick === 0) vspeedTick = 0;
-
-      player.vx = hspeedTick * PHYS_TPS;
-      player.vy = vspeedTick * PHYS_TPS;
-    } else if (!player.onGround) {
-      player.swimming = false;
-
-      let hspeedTick = player.vx / PHYS_TPS;
-      let vspeedTick = player.vy / PHYS_TPS;
-
-      vspeedTick += PHYS_GRAVFORCE * numTicks;
-
-      if (effectiveMove < 0 && hspeedTick > 0) {
-        hspeedTick -= PHYS_FALL_BRAKE * numTicks;
-      } else if (effectiveMove > 0 && hspeedTick < 0) {
-        hspeedTick += PHYS_FALL_BRAKE * numTicks;
-      }
-
-      player.vx = hspeedTick * PHYS_TPS;
-      player.vy = Math.min(vspeedTick * PHYS_TPS, PHYS_FALL_SPEED_CAP);
     } else {
       player.swimming = false;
     }
@@ -3257,6 +3265,7 @@ function updateSummary() {
       x: Number(runtime.player.x.toFixed(2)),
       y: Number(runtime.player.y.toFixed(2)),
       onGround: runtime.player.onGround,
+      swimming: runtime.player.swimming,
       facing: runtime.player.facing,
       action: runtime.player.action,
       footholdLayer: runtime.player.footholdLayer,
