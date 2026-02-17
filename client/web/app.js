@@ -165,6 +165,7 @@ const runtime = {
   lastCharacterBounds: null,
   standardCharacterWidth: DEFAULT_STANDARD_CHARACTER_WIDTH,
 
+  audioUnlocked: false,
   bgmAudio: null,
   currentBgmPath: null,
   loading: {
@@ -2421,8 +2422,9 @@ function updatePlayer(dt) {
         player.swimming = true;
 
         // Swim-jump: fires continuously while Space is held — player can
-        // jump upward as many times as they want
-        if (jumpRequested) {
+        // jump upward as many times as they want.
+        // Skip if player is in a down-jump (don't override the drop velocity).
+        if (jumpRequested && !player.downJumpControlLock) {
           vspeedTick = -playerJumpforce() * PHYS_SWIM_JUMP_MULT;
         }
 
@@ -2432,7 +2434,7 @@ function updatePlayer(dt) {
         if (runtime.input.left && !runtime.input.right) hforce = -PHYS_SWIM_HFORCE;
         else if (runtime.input.right && !runtime.input.left) hforce = PHYS_SWIM_HFORCE;
         if (runtime.input.up && !runtime.input.down) vforce = -PHYS_FLYFORCE;
-        else if (runtime.input.down && !runtime.input.up) vforce = PHYS_FLYFORCE;
+        else if (runtime.input.down && !runtime.input.up) vforce = PHYS_SWIM_HFORCE;
 
         // Per-tick integration: friction + gravity + directional force
         for (let t = 0; t < numTicks; t++) {
@@ -3479,6 +3481,16 @@ function requestSoundDataUri(soundFile, soundName) {
   return soundDataPromiseCache.get(key);
 }
 
+function unlockAudio() {
+  if (runtime.audioUnlocked) return;
+  runtime.audioUnlocked = true;
+
+  // Retry pending BGM after user gesture unlocks audio
+  if (runtime.settings.bgmEnabled && runtime.currentBgmPath && !runtime.bgmAudio) {
+    playBgmPath(runtime.currentBgmPath);
+  }
+}
+
 async function playBgmPath(bgmPath) {
   if (!bgmPath) return;
 
@@ -3507,10 +3519,16 @@ async function playBgmPath(bgmPath) {
     runtime.bgmAudio = audio;
 
     await audio.play();
+    runtime.audioUnlocked = true;
     setStatus(`Loaded map ${runtime.mapId}. BGM playing: ${bgmPath}`);
   } catch (error) {
-    console.warn("[audio] bgm failed", error);
-    setStatus(`Loaded map ${runtime.mapId}. BGM unavailable (${bgmPath}).`);
+    if (error.name === "NotAllowedError") {
+      // Browser autoplay blocked — will retry on first user interaction
+      console.info("[audio] BGM blocked by autoplay policy, will retry on user gesture");
+    } else {
+      console.warn("[audio] bgm failed", error);
+    }
+    setStatus(`Loaded map ${runtime.mapId}. BGM will start on first interaction.`);
   }
 }
 
@@ -3875,6 +3893,20 @@ settingsModalEl?.addEventListener("click", (e) => {
     canvasEl.focus();
   }
 });
+
+// Unlock audio on first user interaction (browser autoplay policy)
+{
+  const audioUnlockEvents = ["click", "keydown", "touchstart"];
+  function onFirstInteraction() {
+    unlockAudio();
+    for (const ev of audioUnlockEvents) {
+      document.removeEventListener(ev, onFirstInteraction);
+    }
+  }
+  for (const ev of audioUnlockEvents) {
+    document.addEventListener(ev, onFirstInteraction, { passive: true });
+  }
+}
 
 bindInput();
 requestAnimationFrame(tick);
