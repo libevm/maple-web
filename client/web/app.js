@@ -2294,7 +2294,11 @@ function updatePlayer(dt) {
       player.vx = hspeedTick * PHYS_TPS;
       player.vy = 0;
 
-      if (jumpRequested) {
+      if (map.swim && jumpRequested) {
+        // Swim maps: Space detaches from ground and enters swim (no normal jump)
+        player.onGround = false;
+        player.footholdId = null;
+      } else if (jumpRequested) {
         const footholdGround =
           currentFoothold && !isWallFoothold(currentFoothold)
             ? groundYOnFoothold(currentFoothold, player.x)
@@ -2346,12 +2350,14 @@ function updatePlayer(dt) {
         player.swimming = true;
 
         // PlayerFlyState::update — set hforce/vforce from directional input
+        // Space also acts as swim-up on swim maps
         let hforceTick = 0;
         let vforceTick = 0;
         if (runtime.input.left && !runtime.input.right) hforceTick = -PHYS_FLYFORCE;
         else if (runtime.input.right && !runtime.input.left) hforceTick = PHYS_FLYFORCE;
-        if (runtime.input.up && !runtime.input.down) vforceTick = -PHYS_FLYFORCE;
-        else if (runtime.input.down && !runtime.input.up) vforceTick = PHYS_FLYFORCE;
+        const swimUp = runtime.input.up || runtime.input.jumpHeld;
+        if (swimUp && !runtime.input.down) vforceTick = -PHYS_FLYFORCE;
+        else if (runtime.input.down && !swimUp) vforceTick = PHYS_FLYFORCE;
 
         // Physics::move_swimming per-tick integration
         for (let t = 0; t < numTicks; t++) {
@@ -2508,14 +2514,12 @@ function updatePlayer(dt) {
     climbAction = "rope";
   }
 
-  const swimAction = getCharacterActionFrames("swim").length > 0 ? "swim" : "jump";
-
   const nextAction = player.climbing
     ? climbAction
     : crouchActive
       ? crouchAction
       : player.swimming
-        ? swimAction
+        ? "fly"
         : !player.onGround
           ? "jump"
           : player.onGround && Math.abs(player.vx) > 5
@@ -3535,7 +3539,7 @@ async function loadMap(mapId, spawnPortalName = null, spawnFromPortalTransfer = 
     setStatus(`Loaded map ${runtime.mapId}. Click/hover canvas to control. Controls: ←/→ move, Space jump, ↑ grab rope, ↑/↓ climb, ↓ crouch, Enter to chat.`);
     addSystemChatMessage(`[Welcome] Loaded map ${runtime.mapId}. Press Enter to chat.`);
     if (runtime.map?.swim) {
-      addSystemChatMessage(`[Info] This is a swim map. Use arrow keys to swim.`);
+      addSystemChatMessage(`[Info] This is a swim map. Use arrow keys or Space to swim.`);
     }
   } catch (error) {
     if (loadToken === runtime.mapLoadToken) {
