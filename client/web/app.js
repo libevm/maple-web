@@ -16,6 +16,7 @@ const debugOverlayToggleEl = document.getElementById("debug-overlay-toggle");
 const debugRopesToggleEl = document.getElementById("debug-ropes-toggle");
 const debugFootholdsToggleEl = document.getElementById("debug-footholds-toggle");
 const debugLifeToggleEl = document.getElementById("debug-life-toggle");
+const debugMouseFlyToggleEl = document.getElementById("debug-mousefly-toggle");
 const statSpeedInputEl = document.getElementById("stat-speed-input");
 const statJumpInputEl = document.getElementById("stat-jump-input");
 const audioEnableButtonEl = document.getElementById("audio-enable-button");
@@ -123,7 +124,9 @@ const runtime = {
     showFootholds: true,
     showLifeMarkers: true,
     aspectMode: ASPECT_MODE_DYNAMIC,
+    mouseFly: false,
   },
+  mouseWorld: { x: 0, y: 0 },
   characterData: null,
   characterHeadData: null,
   characterFaceData: null,
@@ -198,7 +201,18 @@ function syncDebugTogglesFromUi() {
     debugLifeToggleEl.disabled = !runtime.debug.overlayEnabled;
   }
 
+  if (debugMouseFlyToggleEl) {
+    runtime.debug.mouseFly = !!debugMouseFlyToggleEl.checked;
+  }
+
   runtime.debug.aspectMode = ASPECT_MODE_DYNAMIC;
+}
+
+function setMouseFly(enabled) {
+  runtime.debug.mouseFly = enabled;
+  if (debugMouseFlyToggleEl) {
+    debugMouseFlyToggleEl.checked = enabled;
+  }
 }
 
 syncDebugTogglesFromUi();
@@ -2067,6 +2081,17 @@ function updatePlayer(dt) {
   const player = runtime.player;
   const map = runtime.map;
 
+  if (runtime.debug.mouseFly) {
+    player.x = runtime.mouseWorld.x;
+    player.y = runtime.mouseWorld.y;
+    player.vx = 0;
+    player.vy = 0;
+    player.onGround = false;
+    player.onRope = false;
+    player.action = "stand1";
+    return;
+  }
+
   const move = (runtime.input.left ? -1 : 0) + (runtime.input.right ? 1 : 0);
   const climbDir = (runtime.input.up ? -1 : 0) + (runtime.input.down ? 1 : 0);
   const jumpRequested = runtime.input.jumpQueued || runtime.input.jumpHeld;
@@ -3426,6 +3451,17 @@ function bindInput() {
     }
   }
 
+  canvasEl.addEventListener("mousemove", (e) => {
+    const rect = canvasEl.getBoundingClientRect();
+    const scaleX = canvasEl.width / rect.width;
+    const scaleY = canvasEl.height / rect.height;
+    const screenX = (e.clientX - rect.left) * scaleX;
+    const screenY = (e.clientY - rect.top) * scaleY;
+    const biasY = sceneRenderBiasY();
+    runtime.mouseWorld.x = screenX - canvasEl.width / 2 + runtime.camera.x;
+    runtime.mouseWorld.y = screenY - canvasEl.height / 2 - biasY + runtime.camera.y;
+  });
+
   canvasEl.addEventListener("mouseenter", () => setInputEnabled(true));
   canvasEl.addEventListener("mouseleave", () => setInputEnabled(false));
   canvasEl.addEventListener("focus", () => setInputEnabled(true));
@@ -3460,6 +3496,12 @@ function bindInput() {
     if (event.code === "Escape" && runtime.chat.inputActive) {
       event.preventDefault();
       closeChatInput();
+      return;
+    }
+
+    if (event.code === "Space" && event.ctrlKey) {
+      event.preventDefault();
+      setMouseFly(!runtime.debug.mouseFly);
       return;
     }
 
@@ -3554,7 +3596,7 @@ chatInputEl?.addEventListener("mousedown", (e) => {
   }
 });
 
-for (const toggle of [debugOverlayToggleEl, debugRopesToggleEl, debugFootholdsToggleEl, debugLifeToggleEl]) {
+for (const toggle of [debugOverlayToggleEl, debugRopesToggleEl, debugFootholdsToggleEl, debugLifeToggleEl, debugMouseFlyToggleEl]) {
   if (!toggle) continue;
   toggle.addEventListener("change", () => {
     syncDebugTogglesFromUi();
