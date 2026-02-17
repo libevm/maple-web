@@ -28,6 +28,56 @@ The docs UI includes sidebar navigation for markdown files under `docs/`.
 
 ---
 
+## 2026-02-18 06:30 (GMT+11)
+### Summary
+- Audio enabled by default — removed "Enable Audio" button and `audioUnlocked` gate
+- Added settings system: gear button + modal with BGM/SFX toggles and fixed 16:9 display
+- Water environment physics tuned: swim-jump, fly animation, heavier horizontal friction
+- Camera clamping uses VR bounds when present
+- Dead code cleanup: removed `ASPECT_MODE_DYNAMIC`, `aspectMode`, audio enable button
+
+### Files changed
+- `client/web/app.js` — settings state, audio auto-enable, swim physics, camera VR bounds, dead code removal
+- `client/web/index.html` — settings button/modal HTML, removed audio enable button
+- `client/web/styles.css` — settings button/modal styling, fixed 16:9 display mode
+
+### Settings system
+- **Gear button** in canvas (left of debug hamburger), same frosted glass style
+- **Modal** with dark backdrop, closes via ×/Escape/click-outside
+- **Audio section**: BGM toggle (pauses/resumes instantly), SFX toggle
+- **Display section**: Fixed 16:9 resolution (enabled by default, recommended)
+  - Canvas wrapper constrains to 16:9 aspect ratio, centered with black padding
+  - Pillarbox on ultrawide, letterbox on tall displays
+- All persisted in localStorage (`mapleweb.settings.v1`)
+
+### Audio changes
+- `audioUnlocked` removed — audio plays immediately on map load
+- BGM/SFX gated only by settings toggles (not unlock button)
+- Removed `#audio-enable-button` from HTML and all JS references
+
+### Water environment physics
+- Swim-jump: Space gives upward impulse (80% of jump force), fires while held
+- Horizontal: SWIM_HFRICTION=0.14, SWIM_HFORCE=0.12 (sluggish water feel)
+- Gravity: SWIMGRAVFORCE=0.07 (player visibly sinks)
+- Animation: "fly" action (confirmed exists in character data)
+- Normal jump works from ground on swim maps (C++ faithful)
+
+### Camera
+- `mapVisibleBounds()` checks VRLeft/VRRight/VRTop/VRBottom from map info first
+- Falls back to foothold-derived walls/borders
+
+### Dead code removed
+- `ASPECT_MODE_DYNAMIC` constant
+- `runtime.debug.aspectMode` field + assignment in `syncDebugTogglesFromUi()`
+- `audioEnableButtonEl` reference + click handler
+- `runtime.audioUnlocked` flag
+- Runtime summary: removed `mode`/`unlocked`, added `fixed169`/`bgmEnabled`/`sfxEnabled`
+
+### Validation
+- `bun run ci` ✅
+
+---
+
 ## 2026-02-18 08:35 (GMT+11)
 ### Summary
 - Fixed parallax background rendering for dynamic viewport sizes (any browser window/aspect ratio).

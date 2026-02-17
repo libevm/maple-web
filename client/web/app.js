@@ -19,7 +19,7 @@ const debugLifeToggleEl = document.getElementById("debug-life-toggle");
 const debugMouseFlyToggleEl = document.getElementById("debug-mousefly-toggle");
 const statSpeedInputEl = document.getElementById("stat-speed-input");
 const statJumpInputEl = document.getElementById("stat-jump-input");
-const audioEnableButtonEl = document.getElementById("audio-enable-button");
+
 const debugToggleEl = document.getElementById("debug-toggle");
 const debugPanelEl = document.getElementById("debug-panel");
 const debugCloseEl = document.getElementById("debug-close");
@@ -77,7 +77,7 @@ const BG_REFERENCE_WIDTH = 800;
 const BG_REFERENCE_HEIGHT = 600;
 const MIN_CANVAS_WIDTH = 640;
 const MIN_CANVAS_HEIGHT = 320;
-const ASPECT_MODE_DYNAMIC = "dynamic";
+
 const DEFAULT_STANDARD_CHARACTER_WIDTH = 58;
 const CHAT_BUBBLE_LINE_HEIGHT = 16;
 const CHAT_BUBBLE_HORIZONTAL_PADDING = 8;
@@ -141,7 +141,7 @@ const runtime = {
     showRopes: true,
     showFootholds: true,
     showLifeMarkers: true,
-    aspectMode: ASPECT_MODE_DYNAMIC,
+
     mouseFly: false,
   },
   settings: {
@@ -164,7 +164,7 @@ const runtime = {
   lastRenderableCharacterFrame: null,
   lastCharacterBounds: null,
   standardCharacterWidth: DEFAULT_STANDARD_CHARACTER_WIDTH,
-  audioUnlocked: false,
+
   bgmAudio: null,
   currentBgmPath: null,
   loading: {
@@ -228,7 +228,6 @@ function syncDebugTogglesFromUi() {
     runtime.debug.mouseFly = !!debugMouseFlyToggleEl.checked;
   }
 
-  runtime.debug.aspectMode = ASPECT_MODE_DYNAMIC;
 }
 
 function setMouseFly(enabled) {
@@ -3339,12 +3338,12 @@ function updateSummary() {
     bounds: runtime.map.bounds,
     footholdBounds: runtime.map.footholdBounds,
     viewport: {
-      mode: runtime.debug.aspectMode,
       renderWidth: canvasEl.width,
       renderHeight: canvasEl.height,
       displayWidth: Math.round(canvasRect.width),
       displayHeight: Math.round(canvasRect.height),
       aspect: Number((canvasEl.width / Math.max(1, canvasEl.height)).toFixed(3)),
+      fixed169: runtime.settings.fixed169,
     },
     backgrounds: runtime.map.backgrounds.length,
     footholds: runtime.map.footholdLines.length,
@@ -3374,7 +3373,8 @@ function updateSummary() {
       },
     },
     audio: {
-      unlocked: runtime.audioUnlocked,
+      bgmEnabled: runtime.settings.bgmEnabled,
+      sfxEnabled: runtime.settings.sfxEnabled,
       currentBgm: runtime.audioDebug.lastBgm,
       lastSfx: runtime.audioDebug.lastSfx,
       lastSfxAgeMs: runtime.audioDebug.lastSfxAtMs
@@ -3484,7 +3484,7 @@ async function playBgmPath(bgmPath) {
 
   runtime.currentBgmPath = bgmPath;
   runtime.audioDebug.lastBgm = bgmPath;
-  if (!runtime.audioUnlocked || !runtime.settings.bgmEnabled) return;
+  if (!runtime.settings.bgmEnabled) return;
 
   const [soundFile, soundName] = bgmPath.split("/");
   if (!soundFile || !soundName) return;
@@ -3519,7 +3519,7 @@ async function playSfx(soundFile, soundName) {
   runtime.audioDebug.lastSfxAtMs = performance.now();
   runtime.audioDebug.sfxPlayCount += 1;
 
-  if (!runtime.audioUnlocked || !runtime.settings.sfxEnabled) return;
+  if (!runtime.settings.sfxEnabled) return;
 
   try {
     const dataUri = await requestSoundDataUri(soundFile, soundName);
@@ -3820,16 +3820,6 @@ summaryEl?.addEventListener("blur", () => {
   runtimeSummaryPointerSelecting = false;
 });
 
-audioEnableButtonEl.addEventListener("click", async () => {
-  runtime.audioUnlocked = true;
-  audioEnableButtonEl.textContent = "Audio Enabled";
-  audioEnableButtonEl.disabled = true;
-
-  if (runtime.currentBgmPath) {
-    await playBgmPath(runtime.currentBgmPath);
-  }
-});
-
 loadSettings();
 syncSettingsToUI();
 applyFixed169();
@@ -3862,7 +3852,7 @@ settingsBgmToggleEl?.addEventListener("change", () => {
   saveSettings();
   if (!runtime.settings.bgmEnabled && runtime.bgmAudio) {
     runtime.bgmAudio.pause();
-  } else if (runtime.settings.bgmEnabled && runtime.audioUnlocked && runtime.currentBgmPath) {
+  } else if (runtime.settings.bgmEnabled && runtime.currentBgmPath) {
     playBgmPath(runtime.currentBgmPath);
   }
 });
