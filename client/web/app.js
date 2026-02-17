@@ -2993,6 +2993,20 @@ function roundRect(context, x, y, width, height, radius) {
   context.closePath();
 }
 
+function clipBelowMapBottom() {
+  if (!runtime.map) return;
+
+  const bottomY = runtime.map.bounds.maxY;
+  const screen = worldToScreen(0, bottomY);
+
+  if (screen.y < canvasEl.height) {
+    ctx.save();
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, screen.y, canvasEl.width, canvasEl.height - screen.y);
+    ctx.restore();
+  }
+}
+
 function drawHud() {
   if (!runtime.map) return;
 
@@ -3080,6 +3094,7 @@ function render() {
     drawLifeMarkers();
   }
   drawBackgroundLayer(1);
+  clipBelowMapBottom();
   drawChatBubble();
   drawHud();
   drawTransitionOverlay();
