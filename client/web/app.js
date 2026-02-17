@@ -2735,52 +2735,38 @@ function drawBackgroundLayer(frontFlag) {
       y = background.y + shiftY + (screenHalfH - refHalfH) + biasY;
     }
 
+    // C++ tiling: htile/vtile count-based, matching MapBackgrounds.cpp
     const tileX = background.type === 1 || background.type === 3 || background.type === 4 || background.type === 6 || background.type === 7;
     const tileY = background.type === 2 || background.type === 3 || background.type === 5 || background.type === 6 || background.type === 7;
 
-    const baseX = x - (background.flipped ? width - origin.x : origin.x);
-    const baseY = y - origin.y;
+    const htile = tileX ? Math.floor(canvasW / cx) + 3 : 1;
+    const vtile = tileY ? Math.floor(canvasH / cy) + 3 : 1;
 
-    let xBegin = baseX;
-    let xEnd = baseX;
-    let yBegin = baseY;
-    let yEnd = baseY;
+    let drawX = x - (background.flipped ? width - origin.x : origin.x);
+    let drawY = y - origin.y;
 
-    if (tileX) {
-      xBegin += width;
-      xBegin %= cx;
-      if (xBegin <= 0) xBegin += cx;
-      xBegin -= width;
-
-      xEnd -= canvasW;
-      xEnd %= cx;
-      if (xEnd >= 0) xEnd -= cx;
-      xEnd += canvasW;
+    // C++: normalize tiled position to [-cx, 0] / [-cy, 0]
+    if (htile > 1) {
+      while (drawX > 0) drawX -= cx;
+      while (drawX < -cx) drawX += cx;
     }
 
-    if (tileY) {
-      yBegin += height;
-      yBegin %= cy;
-      if (yBegin <= 0) yBegin += cy;
-      yBegin -= height;
-
-      yEnd -= canvasH;
-      yEnd %= cy;
-      if (yEnd >= 0) yEnd -= cy;
-      yEnd += canvasH;
+    if (vtile > 1) {
+      while (drawY > 0) drawY -= cy;
+      while (drawY < -cy) drawY += cy;
     }
 
-    const drawStartX = tileX ? Math.floor(xBegin) - 2 : Math.round(baseX);
-    const drawEndX = tileX ? Math.ceil(xEnd) + 2 : Math.round(baseX);
-    const drawStartY = tileY ? Math.floor(yBegin) - 2 : Math.round(baseY);
-    const drawEndY = tileY ? Math.ceil(yEnd) + 2 : Math.round(baseY);
+    const ix = Math.round(drawX);
+    const iy = Math.round(drawY);
+    const tw = cx * htile;
+    const th = cy * vtile;
 
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, background.alpha));
 
-    for (let tx = drawStartX; tx <= drawEndX; tx += cx) {
-      for (let ty = drawStartY; ty <= drawEndY; ty += cy) {
-        drawScreenImage(image, tx, ty, background.flipped);
+    for (let tx = 0; tx < tw; tx += cx) {
+      for (let ty = 0; ty < th; ty += cy) {
+        drawScreenImage(image, ix + tx, iy + ty, background.flipped);
       }
     }
 
