@@ -2767,65 +2767,34 @@ function drawBackgroundLayer(frontFlag) {
     let drawX = x - (background.flipped ? width - origin.x : origin.x);
     let drawY = y - origin.y;
 
-    if (tileX || tileY) {
-      // Tiled backgrounds: C++ count-based approach
-      const htile = tileX ? Math.floor(canvasW / cx) + 3 : 1;
-      const vtile = tileY ? Math.floor(canvasH / cy) + 3 : 1;
+    // C++ tiling: count-based for tiled types, single draw for type 0
+    const htile = tileX ? Math.floor(canvasW / cx) + 3 : 1;
+    const vtile = tileY ? Math.floor(canvasH / cy) + 3 : 1;
 
-      if (htile > 1) {
-        while (drawX > 0) drawX -= cx;
-        while (drawX < -cx) drawX += cx;
-      }
-      if (vtile > 1) {
-        while (drawY > 0) drawY -= cy;
-        while (drawY < -cy) drawY += cy;
-      }
-
-      const ix = Math.round(drawX);
-      const iy = Math.round(drawY);
-      const tw = cx * htile;
-      const th = cy * vtile;
-
-      ctx.save();
-      ctx.globalAlpha = Math.max(0, Math.min(1, background.alpha));
-      for (let tx = 0; tx < tw; tx += cx) {
-        for (let ty = 0; ty < th; ty += cy) {
-          drawScreenImage(image, ix + tx, iy + ty, background.flipped);
-        }
-      }
-      ctx.restore();
-    } else {
-      // Non-tiled (type 0): draw at position, then extend copies
-      // to fill any viewport gaps on left/right edges.
-      // Original backgrounds were designed for 800×600; on wider
-      // viewports the single image may not cover the full width.
-      const ix = Math.round(drawX);
-      const iy = Math.round(drawY);
-      const imageRight = ix + width;
-      const imageLeft = ix;
-
-      ctx.save();
-      ctx.globalAlpha = Math.max(0, Math.min(1, background.alpha));
-
-      // Draw the original placement
-      drawScreenImage(image, ix, iy, background.flipped);
-
-      // Extend left: fill gap between viewport left (0) and image left
-      if (imageLeft > 0) {
-        for (let ex = ix - cx; ex + width > 0; ex -= cx) {
-          drawScreenImage(image, ex, iy, background.flipped);
-        }
-      }
-
-      // Extend right: fill gap between image right and viewport right
-      if (imageRight < canvasW) {
-        for (let ex = ix + cx; ex < canvasW; ex += cx) {
-          drawScreenImage(image, ex, iy, background.flipped);
-        }
-      }
-
-      ctx.restore();
+    if (htile > 1) {
+      while (drawX > 0) drawX -= cx;
+      while (drawX < -cx) drawX += cx;
     }
+    if (vtile > 1) {
+      while (drawY > 0) drawY -= cy;
+      while (drawY < -cy) drawY += cy;
+    }
+
+    const ix = Math.round(drawX);
+    const iy = Math.round(drawY);
+    const tw = cx * htile;
+    const th = cy * vtile;
+
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, background.alpha));
+
+    for (let tx = 0; tx < tw; tx += cx) {
+      for (let ty = 0; ty < th; ty += cy) {
+        drawScreenImage(image, ix + tx, iy + ty, background.flipped);
+      }
+    }
+
+    ctx.restore();
   }
 }
 
