@@ -49,6 +49,9 @@ const PHYS_MAX_LAND_SPEED = 162.5;
 const PHYS_ROPE_JUMP_HMULT = 6.0;
 const PHYS_ROPE_JUMP_VDIV = 1.5;
 const PHYS_CLIMB_ACTION_DELAY_MS = 200;
+const PHYS_SWIMGRAVFORCE = 0.03;
+const PHYS_SWIMFRICTION = 0.08;
+const PHYS_FLYFORCE = 0.25;
 const PHYS_DEFAULT_SPEED_STAT = 115;
 const PHYS_DEFAULT_JUMP_STAT = 110;
 const HIDDEN_PORTAL_REVEAL_DELAY_MS = 500;
@@ -84,6 +87,7 @@ const runtime = {
     vy: 0,
     onGround: false,
     climbing: false,
+    swimming: false,
     climbRope: null,
     climbCooldownUntil: 0,
     climbAttachTime: 0,
@@ -317,6 +321,7 @@ function applyManualTeleport(x, y) {
   player.vx = 0;
   player.vy = 0;
   player.climbing = false;
+  player.swimming = false;
   player.climbRope = null;
   player.climbCooldownUntil = 0;
   player.climbAttachTime = 0;
@@ -507,21 +512,19 @@ function initChatLogResize() {
     }
   }
 
+  const HANDLE_HEIGHT = 14;
+
   function collapseChatLog() {
     chatLogExpandedHeight = chatLogEl.offsetHeight || chatLogExpandedHeight;
     chatLogCollapsed = true;
-    chatLogEl.style.height = "0px";
-    chatLogEl.style.minHeight = "0px";
-    chatLogEl.style.overflow = "hidden";
-    chatLogEl.style.borderTop = "none";
+    chatLogEl.style.height = HANDLE_HEIGHT + "px";
+    chatLogEl.style.minHeight = HANDLE_HEIGHT + "px";
   }
 
   function expandChatLog() {
     chatLogCollapsed = false;
     chatLogEl.style.height = chatLogExpandedHeight + "px";
     chatLogEl.style.minHeight = "";
-    chatLogEl.style.overflow = "";
-    chatLogEl.style.borderTop = "";
   }
 
   let dragging = false;
@@ -554,11 +557,9 @@ function initChatLogResize() {
     if (!wrapperRect) return;
     const maxH = Math.floor(wrapperRect.height * 0.75);
     const delta = startY - e.clientY;
-    const newH = Math.max(48, Math.min(maxH, startHeight + delta));
+    const newH = Math.max(HANDLE_HEIGHT + 20, Math.min(maxH, startHeight + delta));
     chatLogEl.style.height = newH + "px";
     chatLogEl.style.minHeight = "";
-    chatLogEl.style.overflow = "";
-    chatLogEl.style.borderTop = "";
     chatLogCollapsed = false;
   });
 
@@ -1093,6 +1094,7 @@ function parseMapData(raw) {
 
   return {
     info,
+    swim: safeNumber(info.swim, 0) === 1,
     backgrounds,
     blackBackground,
     layers,
@@ -2319,7 +2321,37 @@ function updatePlayer(dt) {
       }
     }
 
-    if (!player.onGround) {
+    if (!player.onGround && map.swim && !player.climbing) {
+      player.swimming = true;
+
+      let hspeedTick = player.vx / PHYS_TPS;
+      let vspeedTick = player.vy / PHYS_TPS;
+
+      let hforceTick = 0;
+      let vforceTick = 0;
+      if (effectiveMove < 0) hforceTick = -PHYS_FLYFORCE;
+      else if (effectiveMove > 0) hforceTick = PHYS_FLYFORCE;
+      if (runtime.input.up && !runtime.input.down) vforceTick = -PHYS_FLYFORCE;
+      else if (runtime.input.down && !runtime.input.up) vforceTick = PHYS_FLYFORCE;
+
+      for (let t = 0; t < numTicks; t++) {
+        let hacc = hforceTick;
+        let vacc = vforceTick;
+        hacc -= PHYS_SWIMFRICTION * hspeedTick;
+        vacc -= PHYS_SWIMFRICTION * vspeedTick;
+        vacc += PHYS_SWIMGRAVFORCE;
+        hspeedTick += hacc;
+        vspeedTick += vacc;
+      }
+
+      if (Math.abs(hspeedTick) < PHYS_HSPEED_DEADZONE && hforceTick === 0) hspeedTick = 0;
+      if (Math.abs(vspeedTick) < PHYS_HSPEED_DEADZONE && vforceTick === 0) vspeedTick = 0;
+
+      player.vx = hspeedTick * PHYS_TPS;
+      player.vy = vspeedTick * PHYS_TPS;
+    } else if (!player.onGround) {
+      player.swimming = false;
+
       let hspeedTick = player.vx / PHYS_TPS;
       let vspeedTick = player.vy / PHYS_TPS;
 
@@ -2333,6 +2365,8 @@ function updatePlayer(dt) {
 
       player.vx = hspeedTick * PHYS_TPS;
       player.vy = Math.min(vspeedTick * PHYS_TPS, PHYS_FALL_SPEED_CAP);
+    } else {
+      player.swimming = false;
     }
 
     let horizontalApplied = false;
@@ -2452,15 +2486,19 @@ function updatePlayer(dt) {
     climbAction = "rope";
   }
 
+  const swimAction = getCharacterActionFrames("swim").length > 0 ? "swim" : "jump";
+
   const nextAction = player.climbing
     ? climbAction
     : crouchActive
       ? crouchAction
-      : !player.onGround
-        ? "jump"
-        : player.onGround && Math.abs(player.vx) > 5
-          ? "walk1"
-          : "stand1";
+      : player.swimming
+        ? swimAction
+        : !player.onGround
+          ? "jump"
+          : player.onGround && Math.abs(player.vx) > 5
+            ? "walk1"
+            : "stand1";
 
   if (nextAction !== player.action) {
     player.action = nextAction;
@@ -3473,6 +3511,9 @@ async function loadMap(mapId, spawnPortalName = null, spawnFromPortalTransfer = 
 
     setStatus(`Loaded map ${runtime.mapId}. Click/hover canvas to control. Controls: ←/→ move, Space jump, ↑ grab rope, ↑/↓ climb, ↓ crouch, Enter to chat.`);
     addSystemChatMessage(`[Welcome] Loaded map ${runtime.mapId}. Press Enter to chat.`);
+    if (runtime.map?.swim) {
+      addSystemChatMessage(`[Info] This is a swim map. Use arrow keys to swim.`);
+    }
   } catch (error) {
     if (loadToken === runtime.mapLoadToken) {
       runtime.loading.active = false;
