@@ -26,7 +26,19 @@
 
       <section class="layout">
         <canvas id="map-canvas" width="1280" height="640" tabindex="0"></canvas>
-        <pre id="map-summary"></pre>
+
+        <aside id="debug-panel">
+          <h2>Debug Tools &amp; Logs</h2>
+
+          <div class="debug-toggles">
+            <label><input id="debug-overlay-toggle" type="checkbox" checked /> Enable overlay</label>
+            <label><input id="debug-ropes-toggle" type="checkbox" checked /> Ropes</label>
+            <label><input id="debug-footholds-toggle" type="checkbox" checked /> Footholds</label>
+            <label><input id="debug-life-toggle" type="checkbox" checked /> Life markers</label>
+          </div>
+
+          <pre id="map-summary"></pre>
+        </aside>
       </section>
     </main>
 

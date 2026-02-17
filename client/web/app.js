@@ -4,6 +4,10 @@ const mapFormEl = document.getElementById("map-form");
 const mapIdInputEl = document.getElementById("map-id-input");
 const chatFormEl = document.getElementById("chat-form");
 const chatInputEl = document.getElementById("chat-input");
+const debugOverlayToggleEl = document.getElementById("debug-overlay-toggle");
+const debugRopesToggleEl = document.getElementById("debug-ropes-toggle");
+const debugFootholdsToggleEl = document.getElementById("debug-footholds-toggle");
+const debugLifeToggleEl = document.getElementById("debug-life-toggle");
 const audioEnableButtonEl = document.getElementById("audio-enable-button");
 const canvasEl = document.getElementById("map-canvas");
 const ctx = canvasEl.getContext("2d");
@@ -17,6 +21,12 @@ const soundDataUriCache = new Map();
 const soundDataPromiseCache = new Map();
 
 const FACE_ANIMATION_SPEED = 1.6;
+const CPP_GROUND_FRICTION = 0.5;
+const CPP_SLOPE_FACTOR = 0.1;
+const CPP_GROUND_SLIP = 3.0;
+const PORTAL_SPAWN_Y_OFFSET = 24;
+const PORTAL_FADE_OUT_MS = 180;
+const PORTAL_FADE_IN_MS = 240;
 
 const runtime = {
   map: null,
@@ -55,6 +65,12 @@ const runtime = {
     jumpHeld: false,
     jumpQueued: false,
   },
+  debug: {
+    overlayEnabled: true,
+    showRopes: true,
+    showFootholds: true,
+    showLifeMarkers: true,
+  },
   characterData: null,
   characterHeadData: null,
   characterFaceData: null,
@@ -66,17 +82,55 @@ const runtime = {
   },
   zMapOrder: {},
   characterDataPromise: null,
+  lastRenderableCharacterFrame: null,
   audioUnlocked: false,
   bgmAudio: null,
   currentBgmPath: null,
+  loading: {
+    active: false,
+    total: 0,
+    loaded: 0,
+    progress: 0,
+    label: "",
+  },
   audioDebug: {
     lastSfx: null,
     lastSfxAtMs: 0,
     sfxPlayCount: 0,
     lastBgm: null,
   },
+  mapLoadToken: 0,
+  portalCooldownUntil: 0,
+  portalWarpInProgress: false,
+  transition: {
+    alpha: 0,
+    active: false,
+  },
   previousTimestampMs: null,
 };
+
+function syncDebugTogglesFromUi() {
+  if (debugOverlayToggleEl) {
+    runtime.debug.overlayEnabled = !!debugOverlayToggleEl.checked;
+  }
+
+  if (debugRopesToggleEl) {
+    runtime.debug.showRopes = !!debugRopesToggleEl.checked;
+    debugRopesToggleEl.disabled = !runtime.debug.overlayEnabled;
+  }
+
+  if (debugFootholdsToggleEl) {
+    runtime.debug.showFootholds = !!debugFootholdsToggleEl.checked;
+    debugFootholdsToggleEl.disabled = !runtime.debug.overlayEnabled;
+  }
+
+  if (debugLifeToggleEl) {
+    runtime.debug.showLifeMarkers = !!debugLifeToggleEl.checked;
+    debugLifeToggleEl.disabled = !runtime.debug.overlayEnabled;
+  }
+}
+
+syncDebugTogglesFromUi();
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -264,47 +318,64 @@ async function fetchJson(path) {
 }
 
 function requestMeta(key, loader) {
-  if (metaCache.has(key) || metaPromiseCache.has(key)) return;
+  if (metaCache.has(key)) {
+    return Promise.resolve(metaCache.get(key));
+  }
 
-  metaPromiseCache.set(
-    key,
-    (async () => {
-      try {
-        const meta = await loader();
-        if (meta) {
-          metaCache.set(key, meta);
+  if (!metaPromiseCache.has(key)) {
+    metaPromiseCache.set(
+      key,
+      (async () => {
+        try {
+          const meta = await loader();
+          if (meta) {
+            metaCache.set(key, meta);
+            return meta;
+          }
+        } catch (error) {
+          console.warn("[asset-meta] failed", key, error);
+        } finally {
+          metaPromiseCache.delete(key);
         }
-      } catch (error) {
-        console.warn("[asset-meta] failed", key, error);
-      } finally {
-        metaPromiseCache.delete(key);
-      }
-    })(),
-  );
+
+        return null;
+      })(),
+    );
+  }
+
+  return metaPromiseCache.get(key);
 }
 
 function requestImageByKey(key) {
-  if (imageCache.has(key) || imagePromiseCache.has(key)) return;
+  if (imageCache.has(key)) {
+    return Promise.resolve(imageCache.get(key));
+  }
+
+  if (imagePromiseCache.has(key)) {
+    return imagePromiseCache.get(key);
+  }
 
   const meta = metaCache.get(key);
-  if (!meta) return;
+  if (!meta) {
+    return Promise.resolve(null);
+  }
 
-  imagePromiseCache.set(
-    key,
-    new Promise((resolve) => {
-      const image = new Image();
-      image.onload = () => {
-        imageCache.set(key, image);
-        imagePromiseCache.delete(key);
-        resolve();
-      };
-      image.onerror = () => {
-        imagePromiseCache.delete(key);
-        resolve();
-      };
-      image.src = `data:image/png;base64,${meta.basedata}`;
-    }),
-  );
+  const promise = new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      imageCache.set(key, image);
+      imagePromiseCache.delete(key);
+      resolve(image);
+    };
+    image.onerror = () => {
+      imagePromiseCache.delete(key);
+      resolve(null);
+    };
+    image.src = `data:image/png;base64,${meta.basedata}`;
+  });
+
+  imagePromiseCache.set(key, promise);
+  return promise;
 }
 
 function getImageByKey(key) {
@@ -397,23 +468,28 @@ function parseMapData(raw) {
     const layerInfo = imgdirLeafRecord(childByName(layerNode, "info"));
     const tileSet = layerInfo.tS ? String(layerInfo.tS) : null;
 
-    const tiles = imgdirChildren(childByName(layerNode, "tile")).map((entry) => {
-      const row = imgdirLeafRecord(entry);
-      return {
-        x: safeNumber(row.x, 0),
-        y: safeNumber(row.y, 0),
-        u: String(row.u ?? ""),
-        no: String(row.no ?? "0"),
-        tileSet,
-        key: tileSet ? `tile:${tileSet}:${row.u}:${row.no}` : null,
-      };
-    });
+    const tiles = imgdirChildren(childByName(layerNode, "tile"))
+      .map((entry) => {
+        const row = imgdirLeafRecord(entry);
+        return {
+          id: safeNumber(entry.$imgdir, 0),
+          x: safeNumber(row.x, 0),
+          y: safeNumber(row.y, 0),
+          u: String(row.u ?? ""),
+          no: String(row.no ?? "0"),
+          z: safeNumber(row.zM, 0),
+          tileSet,
+          key: tileSet ? `tile:${tileSet}:${row.u}:${row.no}` : null,
+        };
+      })
+      .sort((a, b) => (a.z === b.z ? a.id - b.id : a.z - b.z));
 
     const objects = imgdirChildren(childByName(layerNode, "obj"))
       .map((entry) => {
         const row = imgdirLeafRecord(entry);
         const frameNo = String(row.f ?? "0");
         return {
+          id: safeNumber(entry.$imgdir, 0),
           x: safeNumber(row.x, 0),
           y: safeNumber(row.y, 0),
           oS: String(row.oS ?? ""),
@@ -425,7 +501,7 @@ function parseMapData(raw) {
           key: `obj:${row.oS}:${row.l0}:${row.l1}:${row.l2}:${frameNo}`,
         };
       })
-      .sort((a, b) => a.z - b.z);
+      .sort((a, b) => (a.z === b.z ? a.id - b.id : a.z - b.z));
 
     layers.push({ layerIndex, tileSet, tiles, objects });
   }
@@ -541,6 +617,9 @@ function parseMapData(raw) {
   const minY = Math.min(...points.map((p) => p.y), -220);
   const maxY = Math.max(...points.map((p) => p.y), 380);
 
+  const footholdMinX = footholdLines.length > 0 ? leftWall : minX;
+  const footholdMaxX = footholdLines.length > 0 ? rightWall : maxX;
+
   return {
     info,
     backgrounds,
@@ -554,48 +633,61 @@ function parseMapData(raw) {
     wallLines,
     walls,
     borders,
+    footholdBounds: {
+      minX: footholdMinX,
+      maxX: footholdMaxX,
+    },
     bounds: { minX, maxX, minY, maxY },
   };
 }
 
+async function loadBackgroundMeta(entry) {
+  if (!entry.key || !entry.bS) return null;
+
+  const path = `/resources/Map.wz/Back/${entry.bS}.img.json`;
+  const json = await fetchJson(path);
+  const group = childByName(json, entry.ani === 1 ? "ani" : "back");
+
+  const directCanvasNode = (group?.$$ ?? []).find((child) => child.$canvas === entry.no);
+  const node = childByName(group, entry.no) ?? directCanvasNode;
+  const canvasNode = pickCanvasNode(node, "0") ?? directCanvasNode;
+
+  return canvasMetaFromNode(canvasNode);
+}
+
 function requestBackgroundMeta(entry) {
   if (!entry.key || !entry.bS) return;
+  requestMeta(entry.key, () => loadBackgroundMeta(entry));
+}
 
-  requestMeta(entry.key, async () => {
-    const path = `/resources/Map.wz/Back/${entry.bS}.img.json`;
-    const json = await fetchJson(path);
-    const group = childByName(json, entry.ani === 1 ? "ani" : "back");
+async function loadTileMeta(tile) {
+  if (!tile.key || !tile.tileSet) return null;
 
-    const directCanvasNode = (group?.$$ ?? []).find((child) => child.$canvas === entry.no);
-    const node = childByName(group, entry.no) ?? directCanvasNode;
-    const canvasNode = pickCanvasNode(node, "0") ?? directCanvasNode;
-
-    return canvasMetaFromNode(canvasNode);
-  });
+  const path = `/resources/Map.wz/Tile/${tile.tileSet}.img.json`;
+  const json = await fetchJson(path);
+  const group = childByName(json, tile.u);
+  const canvasNode = pickCanvasNode(group, tile.no);
+  return canvasMetaFromNode(canvasNode);
 }
 
 function requestTileMeta(tile) {
   if (!tile.key || !tile.tileSet) return;
+  requestMeta(tile.key, () => loadTileMeta(tile));
+}
 
-  requestMeta(tile.key, async () => {
-    const path = `/resources/Map.wz/Tile/${tile.tileSet}.img.json`;
-    const json = await fetchJson(path);
-    const group = childByName(json, tile.u);
-    const canvasNode = pickCanvasNode(group, tile.no);
-    return canvasMetaFromNode(canvasNode);
-  });
+async function loadObjectMeta(obj) {
+  if (!obj.key) return null;
+
+  const path = `/resources/Map.wz/Obj/${obj.oS}.img.json`;
+  const json = await fetchJson(path);
+  const target = findNodeByPath(json, [obj.l0, obj.l1, obj.l2]);
+  const canvasNode = pickCanvasNode(target, obj.frameNo);
+  return canvasMetaFromNode(canvasNode);
 }
 
 function requestObjectMeta(obj) {
   if (!obj.key) return;
-
-  requestMeta(obj.key, async () => {
-    const path = `/resources/Map.wz/Obj/${obj.oS}.img.json`;
-    const json = await fetchJson(path);
-    const target = findNodeByPath(json, [obj.l0, obj.l1, obj.l2]);
-    const canvasNode = pickCanvasNode(target, obj.frameNo);
-    return canvasMetaFromNode(canvasNode);
-  });
+  requestMeta(obj.key, () => loadObjectMeta(obj));
 }
 
 function portalVisibilityMode(portal) {
@@ -623,6 +715,151 @@ function portalBoundsContainsPlayer(portal) {
   );
 }
 
+function isValidPortalTargetMapId(mapId) {
+  return Number.isFinite(mapId) && mapId >= 0 && mapId < 999999999;
+}
+
+function normalizedPortalTargetName(targetPortalName) {
+  const name = String(targetPortalName ?? "").trim();
+  if (!name || name.toLowerCase() === "n/a") return "";
+  return name;
+}
+
+function findUsablePortalAtPlayer(map) {
+  for (const portal of map.portalEntries ?? []) {
+    if (!portalBoundsContainsPlayer(portal)) continue;
+
+    const hasTargetMap = isValidPortalTargetMapId(portal.targetMapId);
+    const hasTargetPortalName = normalizedPortalTargetName(portal.targetPortalName).length > 0;
+    if (!hasTargetMap && !hasTargetPortalName) continue;
+
+    return portal;
+  }
+
+  return null;
+}
+
+function movePlayerToPortalInCurrentMap(targetPortalName) {
+  if (!runtime.map) return false;
+
+  const targetPortal = runtime.map.portalEntries.find((portal) => portal.name === targetPortalName);
+  if (!targetPortal) return false;
+
+  const player = runtime.player;
+  player.x = targetPortal.x;
+
+  const below = findFootholdBelow(runtime.map, targetPortal.x, targetPortal.y);
+  if (below) {
+    player.y = below.y;
+    player.onGround = true;
+    player.footholdId = below.line.id;
+    player.footholdLayer = below.line.layer;
+    player.vy = 0;
+  } else {
+    player.y = targetPortal.y;
+    player.onGround = false;
+    player.footholdId = null;
+  }
+
+  player.vx = 0;
+  player.climbing = false;
+  player.climbRope = null;
+  player.downJumpIgnoreFootholdId = null;
+  player.downJumpIgnoreUntil = 0;
+  player.downJumpControlLock = false;
+  player.downJumpTargetFootholdId = null;
+
+  runtime.camera.x = player.x;
+  runtime.camera.y = player.y - 130;
+  return true;
+}
+
+function waitForAnimationFrame() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
+async function fadeScreenTo(targetAlpha, durationMs) {
+  const startAlpha = runtime.transition.alpha;
+  const clampedTarget = Math.max(0, Math.min(1, targetAlpha));
+  const duration = Math.max(0, durationMs);
+
+  if (duration <= 0) {
+    runtime.transition.alpha = clampedTarget;
+    runtime.transition.active = clampedTarget > 0;
+    return;
+  }
+
+  const startMs = performance.now();
+  runtime.transition.active = true;
+
+  while (true) {
+    const elapsed = performance.now() - startMs;
+    const t = Math.max(0, Math.min(1, elapsed / duration));
+    runtime.transition.alpha = startAlpha + (clampedTarget - startAlpha) * t;
+
+    if (t >= 1) break;
+    await waitForAnimationFrame();
+  }
+
+  runtime.transition.alpha = clampedTarget;
+  runtime.transition.active = clampedTarget > 0;
+}
+
+async function runPortalMapTransition(targetMapId, targetPortalName) {
+  await fadeScreenTo(1, PORTAL_FADE_OUT_MS);
+  try {
+    await loadMap(targetMapId, targetPortalName || null, true);
+  } finally {
+    await fadeScreenTo(0, PORTAL_FADE_IN_MS);
+  }
+}
+
+async function tryUsePortal(force = false) {
+  if (!runtime.map || runtime.loading.active || runtime.portalWarpInProgress) return;
+  if (!force && !runtime.input.up) return;
+  if (runtime.player.climbing) return;
+
+  const nowMs = performance.now();
+  if (nowMs < runtime.portalCooldownUntil) return;
+
+  const portal = findUsablePortalAtPlayer(runtime.map);
+  if (!portal) return;
+
+  runtime.portalCooldownUntil = nowMs + 400;
+  runtime.portalWarpInProgress = true;
+
+  try {
+    playSfx("Game", "Portal");
+
+    const currentMapId = safeNumber(runtime.mapId, -1);
+    const targetPortalName = normalizedPortalTargetName(portal.targetPortalName);
+
+    if (portal.targetMapId === currentMapId || !isValidPortalTargetMapId(portal.targetMapId)) {
+      if (targetPortalName) {
+        const moved = movePlayerToPortalInCurrentMap(targetPortalName);
+        if (moved) {
+          return;
+        }
+      }
+
+      const returnMapId = safeNumber(runtime.map.info?.returnMap, -1);
+      if (isValidPortalTargetMapId(returnMapId) && returnMapId !== currentMapId) {
+        await runPortalMapTransition(String(returnMapId), targetPortalName || null);
+        return;
+      }
+
+      setStatus(`Portal ${portal.name || portal.id} has no local destination in map ${runtime.mapId}.`);
+      return;
+    }
+
+    await runPortalMapTransition(String(portal.targetMapId), targetPortalName || null);
+  } finally {
+    runtime.portalWarpInProgress = false;
+  }
+}
+
 function portalNodePath(portal) {
   switch (portal.type) {
     case 2:
@@ -638,30 +875,40 @@ function portalNodePath(portal) {
   }
 }
 
-function requestPortalMeta(portal, frameNo) {
+function portalMetaKey(portal, frameNo) {
   const path = portalNodePath(portal);
   if (!path) return null;
 
   const imageKey = portal.image || "default";
-  const key = `portal:${portal.type}:${imageKey}:${frameNo}`;
+  return `portal:${portal.type}:${imageKey}:${frameNo}`;
+}
 
-  requestMeta(key, async () => {
-    const json = await fetchJson("/resources/Map.wz/MapHelper.img.json");
+async function loadPortalMeta(portal, frameNo) {
+  const path = portalNodePath(portal);
+  if (!path) return null;
 
-    let portalNode = findNodeByPath(json, path);
-    if (!portalNode && portal.type === 11 && imageKey !== "default") {
-      portalNode = findNodeByPath(json, ["portal", "game", "psh", "default", "portalContinue"]);
-    }
+  const imageKey = portal.image || "default";
+  const json = await fetchJson("/resources/Map.wz/MapHelper.img.json");
 
-    const requested = String(frameNo);
-    const directCanvas =
-      (portalNode?.$$ ?? []).find((child) => child.$canvas === requested) ??
-      (portalNode?.$$ ?? []).find((child) => child.$canvas === "0");
-    const canvasNode = pickCanvasNode(portalNode, requested) ?? directCanvas;
+  let portalNode = findNodeByPath(json, path);
+  if (!portalNode && portal.type === 11 && imageKey !== "default") {
+    portalNode = findNodeByPath(json, ["portal", "game", "psh", "default", "portalContinue"]);
+  }
 
-    return canvasMetaFromNode(canvasNode);
-  });
+  const requested = String(frameNo);
+  const directCanvas =
+    (portalNode?.$$ ?? []).find((child) => child.$canvas === requested) ??
+    (portalNode?.$$ ?? []).find((child) => child.$canvas === "0");
+  const canvasNode = pickCanvasNode(portalNode, requested) ?? directCanvas;
 
+  return canvasMetaFromNode(canvasNode);
+}
+
+function requestPortalMeta(portal, frameNo) {
+  const key = portalMetaKey(portal, frameNo);
+  if (!key) return null;
+
+  requestMeta(key, () => loadPortalMeta(portal, frameNo));
   return key;
 }
 
@@ -679,22 +926,31 @@ function buildZMapOrder(zMapJson) {
 }
 
 function requestCharacterData() {
-  if ((runtime.characterData && runtime.characterHeadData && runtime.characterFaceData) || runtime.characterDataPromise) return;
+  if (runtime.characterData && runtime.characterHeadData && runtime.characterFaceData) {
+    return Promise.resolve();
+  }
 
-  runtime.characterDataPromise = (async () => {
-    const [bodyData, headData, faceData, zMapData] = await Promise.all([
-      fetchJson("/resources/Character.wz/00002000.img.json"),
-      fetchJson("/resources/Character.wz/00012000.img.json"),
-      fetchJson("/resources/Character.wz/Face/00020000.img.json"),
-      fetchJson("/resources/Base.wz/zmap.img.json"),
-    ]);
+  if (!runtime.characterDataPromise) {
+    runtime.characterDataPromise = (async () => {
+      try {
+        const [bodyData, headData, faceData, zMapData] = await Promise.all([
+          fetchJson("/resources/Character.wz/00002000.img.json"),
+          fetchJson("/resources/Character.wz/00012000.img.json"),
+          fetchJson("/resources/Character.wz/Face/00020000.img.json"),
+          fetchJson("/resources/Base.wz/zmap.img.json"),
+        ]);
 
-    runtime.characterData = bodyData;
-    runtime.characterHeadData = headData;
-    runtime.characterFaceData = faceData;
-    runtime.zMapOrder = buildZMapOrder(zMapData);
-    runtime.characterDataPromise = null;
-  })();
+        runtime.characterData = bodyData;
+        runtime.characterHeadData = headData;
+        runtime.characterFaceData = faceData;
+        runtime.zMapOrder = buildZMapOrder(zMapData);
+      } finally {
+        runtime.characterDataPromise = null;
+      }
+    })();
+  }
+
+  return runtime.characterDataPromise;
 }
 
 function getCharacterActionFrames(action) {
@@ -881,6 +1137,109 @@ function requestCharacterPartImage(key, meta) {
   requestImageByKey(key);
 }
 
+function addPreloadTask(taskMap, key, loader) {
+  if (!key || taskMap.has(key)) return;
+  taskMap.set(key, loader);
+}
+
+function buildMapAssetPreloadTasks(map) {
+  const taskMap = new Map();
+
+  for (const background of map.backgrounds ?? []) {
+    if (!background.key || !background.bS) continue;
+    addPreloadTask(taskMap, background.key, () => loadBackgroundMeta(background));
+  }
+
+  for (const layer of map.layers ?? []) {
+    for (const tile of layer.tiles ?? []) {
+      if (!tile.key || !tile.tileSet) continue;
+      addPreloadTask(taskMap, tile.key, () => loadTileMeta(tile));
+    }
+
+    for (const obj of layer.objects ?? []) {
+      if (!obj.key) continue;
+      addPreloadTask(taskMap, obj.key, () => loadObjectMeta(obj));
+    }
+  }
+
+  for (const portal of map.portalEntries ?? []) {
+    if (portalVisibilityMode(portal) === "none") continue;
+
+    const frameCount = portal.type === 10 || portal.type === 11 ? 7 : 8;
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      const key = portalMetaKey(portal, frame);
+      addPreloadTask(taskMap, key, () => loadPortalMeta(portal, frame));
+    }
+  }
+
+  return taskMap;
+}
+
+function addCharacterPreloadTasks(taskMap) {
+  const actions = ["stand1", "walk1", "jump", "ladder", "rope", "prone", "sit"];
+
+  for (const action of actions) {
+    const frame = getCharacterFrameData(action, 0);
+    if (!frame?.parts?.length) continue;
+
+    for (const part of frame.parts) {
+      const key = `char:${action}:0:${part.name}`;
+      addPreloadTask(taskMap, key, async () => part.meta);
+    }
+  }
+}
+
+async function preloadMapAssets(map, loadToken) {
+  const taskMap = buildMapAssetPreloadTasks(map);
+
+  await requestCharacterData();
+  if (loadToken !== runtime.mapLoadToken) return;
+
+  addCharacterPreloadTasks(taskMap);
+
+  const tasks = [...taskMap.entries()];
+  runtime.loading.total = tasks.length;
+  runtime.loading.loaded = 0;
+  runtime.loading.progress = tasks.length > 0 ? 0 : 1;
+  runtime.loading.label = `Loading assets 0/${tasks.length}`;
+
+  if (tasks.length === 0) {
+    return;
+  }
+
+  let cursor = 0;
+  const workerCount = Math.min(8, tasks.length);
+
+  const workers = Array.from({ length: workerCount }, () =>
+    (async () => {
+      while (true) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= tasks.length) break;
+        if (loadToken !== runtime.mapLoadToken) break;
+
+        const [key, loader] = tasks[index];
+        try {
+          const meta = await requestMeta(key, loader);
+          if (meta) {
+            await requestImageByKey(key);
+          }
+        } catch (error) {
+          console.warn("[preload] failed", key, error);
+        } finally {
+          if (loadToken === runtime.mapLoadToken) {
+            runtime.loading.loaded += 1;
+            runtime.loading.progress = runtime.loading.loaded / runtime.loading.total;
+            runtime.loading.label = `Loading assets ${runtime.loading.loaded}/${runtime.loading.total}`;
+          }
+        }
+      }
+    })(),
+  );
+
+  await Promise.all(workers);
+}
+
 function findGroundLanding(oldX, oldY, newX, newY, map, excludedFootholdId = null) {
   const moveX = newX - oldX;
   const moveY = newY - oldY;
@@ -1045,6 +1404,30 @@ function resolveWallCollision(oldX, newX, nextY, map, footholdId) {
   const collision = left ? oldX >= wallX && newX <= wallX : oldX <= wallX && newX >= wallX;
 
   return collision ? wallX : newX;
+}
+
+function footholdSlope(foothold) {
+  const dx = foothold.x2 - foothold.x1;
+  if (Math.abs(dx) < 0.01) return 0;
+  return (foothold.y2 - foothold.y1) / dx;
+}
+
+function applyCppGroundSlopeDrag(hspeed, slope) {
+  const slopef = Math.max(-0.5, Math.min(0.5, slope));
+  const inertia = hspeed / CPP_GROUND_SLIP;
+  const hacc = -(CPP_GROUND_FRICTION + CPP_SLOPE_FACTOR * (1 + slopef * -inertia)) * inertia;
+  return hspeed + hacc;
+}
+
+function applySlopeJumpTakeoffVelocity(hspeed, slope, moveDir) {
+  const slopef = Math.max(-0.5, Math.min(0.5, slope));
+  let next = applyCppGroundSlopeDrag(hspeed, slopef);
+
+  if (Math.abs(moveDir) < 0.01 && Math.abs(next) < 14 && Math.abs(slopef) > 0.01) {
+    next += slopef * 120;
+  }
+
+  return next;
 }
 
 function groundYOnFoothold(foothold, x) {
@@ -1275,6 +1658,13 @@ function updatePlayer(dt) {
         player.footholdId = null;
         playSfx("Game", "Jump");
       } else if (!downJumpRequested) {
+        if (currentFoothold && !isWallFoothold(currentFoothold)) {
+          const slope = footholdSlope(currentFoothold);
+          if (Math.abs(slope) > 0.0001) {
+            player.vx = applySlopeJumpTakeoffVelocity(player.vx, slope, move);
+          }
+        }
+
         player.vy = -540;
         player.onGround = false;
         player.downJumpIgnoreFootholdId = null;
@@ -1443,10 +1833,52 @@ function updateCamera(dt) {
 
   runtime.camera.x += (targetX - runtime.camera.x) * smoothing;
   runtime.camera.y += (targetY - runtime.camera.y) * smoothing;
+
+  const footholdMinX = runtime.map.footholdBounds?.minX ?? runtime.map.bounds.minX;
+  const footholdMaxX = runtime.map.footholdBounds?.maxX ?? runtime.map.bounds.maxX;
+  const halfWidth = canvasEl.width / 2;
+
+  const minCenterX = footholdMinX + halfWidth;
+  const maxCenterX = footholdMaxX - halfWidth;
+
+  if (minCenterX <= maxCenterX) {
+    runtime.camera.x = Math.max(minCenterX, Math.min(maxCenterX, runtime.camera.x));
+  } else {
+    runtime.camera.x = (footholdMinX + footholdMaxX) / 2;
+  }
+}
+
+function drawScreenImage(image, x, y, flipped) {
+  const drawX = Math.round(x);
+  const drawY = Math.round(y);
+
+  if (!flipped) {
+    ctx.drawImage(image, drawX, drawY);
+    return;
+  }
+
+  ctx.save();
+  ctx.translate(drawX + image.width, drawY);
+  ctx.scale(-1, 1);
+  ctx.drawImage(image, 0, 0);
+  ctx.restore();
 }
 
 function drawBackgroundLayer(frontFlag) {
   if (!runtime.map) return;
+
+  const halfW = canvasEl.width / 2;
+  const halfH = canvasEl.height / 2;
+  const viewX = halfW - runtime.camera.x;
+  const viewY = halfH - runtime.camera.y;
+  const nowMs = performance.now();
+
+  if (frontFlag === 0 && runtime.map.blackBackground) {
+    ctx.save();
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
+    ctx.restore();
+  }
 
   for (const background of runtime.map.backgrounds) {
     if ((background.front ? 1 : 0) !== frontFlag) continue;
@@ -1457,37 +1889,62 @@ function drawBackgroundLayer(frontFlag) {
     if (!image || !meta) continue;
 
     const origin = meta.vectors.origin ?? { x: 0, y: 0 };
-    const baseWorldX = background.x - origin.x;
-    const baseWorldY = background.y - origin.y;
+    const width = Math.max(1, image.width || meta.width || 1);
+    const height = Math.max(1, image.height || meta.height || 1);
 
-    const cx = background.cx > 0 ? background.cx : Math.max(1, image.width || meta.width || 1);
-    const cy = background.cy > 0 ? background.cy : Math.max(1, image.height || meta.height || 1);
+    const cx = background.cx > 0 ? background.cx : width;
+    const cy = background.cy > 0 ? background.cy : height;
 
-    const tiledX = background.type === 1 || background.type === 3 || background.type === 4 || background.type === 6 || background.type === 7;
-    const tiledY = background.type === 2 || background.type === 3 || background.type === 5 || background.type === 6 || background.type === 7;
+    const hMobile = background.type === 4 || background.type === 6;
+    const vMobile = background.type === 5 || background.type === 7;
 
-    let worldX = baseWorldX;
-    let worldY = baseWorldY;
-
-    if (tiledX) {
-      while (worldX - runtime.camera.x + canvasEl.width / 2 > 0) worldX -= cx;
-      while (worldX - runtime.camera.x + canvasEl.width / 2 < -cx) worldX += cx;
+    let x;
+    if (hMobile) {
+      x = background.x + (background.rx * nowMs) / 128 + viewX;
+    } else {
+      const shiftX = (background.rx * (halfW - viewX)) / 100 + halfW;
+      x = background.x + shiftX;
     }
 
-    if (tiledY) {
-      while (worldY - runtime.camera.y + canvasEl.height / 2 > 0) worldY -= cy;
-      while (worldY - runtime.camera.y + canvasEl.height / 2 < -cy) worldY += cy;
+    let y;
+    if (vMobile) {
+      y = background.y + (background.ry * nowMs) / 128 + viewY;
+    } else {
+      const shiftY = (background.ry * (halfH - viewY)) / 100 + halfH;
+      y = background.y + shiftY;
     }
 
-    const htile = tiledX ? Math.floor(canvasEl.width / cx) + 3 : 1;
-    const vtile = tiledY ? Math.floor(canvasEl.height / cy) + 3 : 1;
+    let htile = 1;
+    let vtile = 1;
+
+    if (background.type === 1 || background.type === 4) {
+      htile = Math.floor(canvasEl.width / cx) + 3;
+    } else if (background.type === 2 || background.type === 5) {
+      vtile = Math.floor(canvasEl.height / cy) + 3;
+    } else if (background.type === 3 || background.type === 6 || background.type === 7) {
+      htile = Math.floor(canvasEl.width / cx) + 3;
+      vtile = Math.floor(canvasEl.height / cy) + 3;
+    }
+
+    if (htile > 1) {
+      while (x > 0) x -= cx;
+      while (x < -cx) x += cx;
+    }
+
+    if (vtile > 1) {
+      while (y > 0) y -= cy;
+      while (y < -cy) y += cy;
+    }
+
+    const baseX = x - (background.flipped ? width - origin.x : origin.x);
+    const baseY = y - origin.y;
 
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, background.alpha));
 
     for (let tx = 0; tx < htile; tx += 1) {
       for (let ty = 0; ty < vtile; ty += 1) {
-        drawWorldImage(image, worldX + tx * cx, worldY + ty * cy, { flipped: background.flipped });
+        drawScreenImage(image, baseX + tx * cx, baseY + ty * cy, background.flipped);
       }
     }
 
@@ -1495,34 +1952,62 @@ function drawBackgroundLayer(frontFlag) {
   }
 }
 
-function drawMapLayers() {
+function drawMapLayer(layer) {
+  for (const obj of layer.objects) {
+    requestObjectMeta(obj);
+    const image = getImageByKey(obj.key);
+    const meta = metaCache.get(obj.key);
+    if (!image || !meta) continue;
+
+    const origin = meta.vectors.origin ?? { x: 0, y: 0 };
+    const worldX = obj.x - origin.x;
+    const worldY = obj.y - origin.y;
+    drawWorldImage(image, worldX, worldY);
+  }
+
+  for (const tile of layer.tiles) {
+    if (!tile.key) continue;
+    requestTileMeta(tile);
+    const image = getImageByKey(tile.key);
+    const meta = metaCache.get(tile.key);
+    if (!image || !meta) continue;
+
+    const origin = meta.vectors.origin ?? { x: 0, y: 0 };
+    const worldX = tile.x - origin.x;
+    const worldY = tile.y - origin.y;
+    drawWorldImage(image, worldX, worldY);
+  }
+}
+
+function currentPlayerRenderLayer() {
+  if (!runtime.map) return safeNumber(runtime.player.footholdLayer, -1);
+  if (runtime.player.climbing) return 7;
+
+  const below = findFootholdBelow(runtime.map, runtime.player.x, runtime.player.y);
+  if (below?.line && Number.isFinite(below.line.layer)) {
+    return below.line.layer;
+  }
+
+  return safeNumber(runtime.player.footholdLayer, -1);
+}
+
+function drawMapLayersWithCharacter() {
   if (!runtime.map) return;
 
+  const playerLayer = currentPlayerRenderLayer();
+  let playerDrawn = false;
+
   for (const layer of runtime.map.layers) {
-    for (const obj of layer.objects) {
-      requestObjectMeta(obj);
-      const image = getImageByKey(obj.key);
-      const meta = metaCache.get(obj.key);
-      if (!image || !meta) continue;
+    drawMapLayer(layer);
 
-      const origin = meta.vectors.origin ?? { x: 0, y: 0 };
-      const worldX = obj.x - origin.x;
-      const worldY = obj.y - origin.y;
-      drawWorldImage(image, worldX, worldY);
+    if (!playerDrawn && layer.layerIndex === playerLayer) {
+      drawCharacter();
+      playerDrawn = true;
     }
+  }
 
-    for (const tile of layer.tiles) {
-      if (!tile.key) continue;
-      requestTileMeta(tile);
-      const image = getImageByKey(tile.key);
-      const meta = metaCache.get(tile.key);
-      if (!image || !meta) continue;
-
-      const origin = meta.vectors.origin ?? { x: 0, y: 0 };
-      const worldX = tile.x - origin.x;
-      const worldY = tile.y - origin.y;
-      drawWorldImage(image, worldX, worldY);
-    }
+  if (!playerDrawn) {
+    drawCharacter();
   }
 }
 
@@ -1570,7 +2055,7 @@ function drawPortals() {
   }
 }
 
-function drawFootholdsAndMarkers() {
+function drawFootholdOverlay() {
   if (!runtime.map) return;
 
   ctx.save();
@@ -1586,6 +2071,14 @@ function drawFootholdsAndMarkers() {
     ctx.lineTo(b.x, b.y);
     ctx.stroke();
   }
+
+  ctx.restore();
+}
+
+function drawLifeMarkers() {
+  if (!runtime.map) return;
+
+  ctx.save();
 
   for (const life of runtime.map.lifeEntries) {
     const p = worldToScreen(life.x, life.y);
@@ -1635,16 +2128,13 @@ function pickAnchorName(meta, anchors) {
   return names.find((name) => anchors[name]) ?? null;
 }
 
-function drawCharacter() {
-  const player = runtime.player;
-  const frame = getCharacterFrameData(player.action, player.frameIndex);
-  if (!frame || !frame.parts?.length) return;
-
-  const flipped = player.facing > 0;
+function composeCharacterPlacements(action, frameIndex, player, flipped) {
+  const frame = getCharacterFrameData(action, frameIndex);
+  if (!frame || !frame.parts?.length) return null;
 
   const partAssets = frame.parts
     .map((part) => {
-      const key = `char:${player.action}:${player.frameIndex}:${part.name}`;
+      const key = `char:${action}:${frameIndex}:${part.name}`;
       requestCharacterPartImage(key, part.meta);
       const image = getImageByKey(key);
       return {
@@ -1656,7 +2146,7 @@ function drawCharacter() {
     .filter((part) => !!part.image && !!part.meta);
 
   const body = partAssets.find((part) => part.name === "body");
-  if (!body) return;
+  if (!body) return null;
 
   const bodyTopLeft = topLeftFromAnchor(body.meta, body.image, { x: player.x, y: player.y }, null, flipped);
   const anchors = {};
@@ -1694,11 +2184,33 @@ function drawCharacter() {
     }
   }
 
-  placements
-    .sort((a, b) => a.zOrder - b.zOrder)
-    .forEach((part) => {
-      drawWorldImage(part.image, part.topLeft.x, part.topLeft.y, { flipped });
-    });
+  return placements.sort((a, b) => a.zOrder - b.zOrder);
+}
+
+function drawCharacter() {
+  const player = runtime.player;
+  const flipped = player.facing > 0;
+
+  const currentPlacements = composeCharacterPlacements(player.action, player.frameIndex, player, flipped);
+  const fallback = runtime.lastRenderableCharacterFrame;
+  const placements =
+    currentPlacements ??
+    (fallback ? composeCharacterPlacements(fallback.action, fallback.frameIndex, player, flipped) : null);
+
+  if (!placements || placements.length === 0) {
+    return;
+  }
+
+  if (currentPlacements) {
+    runtime.lastRenderableCharacterFrame = {
+      action: player.action,
+      frameIndex: player.frameIndex,
+    };
+  }
+
+  for (const part of placements) {
+    drawWorldImage(part.image, part.topLeft.x, part.topLeft.y, { flipped });
+  }
 }
 
 function drawChatBubble() {
@@ -1768,22 +2280,81 @@ function drawHud() {
   ctx.restore();
 }
 
+function drawLoadingScreen() {
+  const progress = Math.max(0, Math.min(1, runtime.loading.progress || 0));
+  const barWidth = Math.min(460, canvasEl.width - 120);
+  const barHeight = 16;
+  const x = Math.round((canvasEl.width - barWidth) / 2);
+  const y = Math.round(canvasEl.height / 2 + 14);
+
+  ctx.save();
+  ctx.fillStyle = "rgba(2, 6, 23, 0.9)";
+  ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
+
+  ctx.fillStyle = "#f8fafc";
+  ctx.font = "600 20px Inter, system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("Loading map assets...", canvasEl.width / 2, y - 44);
+
+  ctx.fillStyle = "rgba(148, 163, 184, 0.35)";
+  ctx.fillRect(x, y, barWidth, barHeight);
+
+  ctx.fillStyle = "#38bdf8";
+  ctx.fillRect(x, y, Math.round(barWidth * progress), barHeight);
+
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.8)";
+  ctx.strokeRect(x, y, barWidth, barHeight);
+
+  ctx.fillStyle = "#cbd5e1";
+  ctx.font = "13px Inter, system-ui, sans-serif";
+  ctx.fillText(runtime.loading.label || "Preparing assets", canvasEl.width / 2, y + 34);
+
+  ctx.restore();
+}
+
+function drawTransitionOverlay() {
+  const alpha = Math.max(0, Math.min(1, runtime.transition.alpha));
+  if (alpha <= 0) return;
+
+  ctx.save();
+  ctx.fillStyle = `rgba(2, 6, 23, ${alpha.toFixed(3)})`;
+  ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
+  ctx.restore();
+}
+
 function render() {
   ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
   ctx.fillStyle = "#0b1020";
   ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
 
-  if (!runtime.map) return;
+  if (runtime.loading.active) {
+    drawLoadingScreen();
+    drawTransitionOverlay();
+    return;
+  }
+
+  if (!runtime.map) {
+    drawTransitionOverlay();
+    return;
+  }
 
   drawBackgroundLayer(0);
-  drawMapLayers();
-  drawRopeGuides();
-  drawCharacter();
+  drawMapLayersWithCharacter();
+  if (runtime.debug.overlayEnabled && runtime.debug.showRopes) {
+    drawRopeGuides();
+  }
   drawPortals();
-  drawFootholdsAndMarkers();
+  if (runtime.debug.overlayEnabled && runtime.debug.showFootholds) {
+    drawFootholdOverlay();
+  }
+  if (runtime.debug.overlayEnabled && runtime.debug.showLifeMarkers) {
+    drawLifeMarkers();
+  }
   drawBackgroundLayer(1);
   drawChatBubble();
   drawHud();
+  drawTransitionOverlay();
 }
 
 function updateSummary() {
@@ -1800,6 +2371,7 @@ function updateSummary() {
     mapMark: runtime.map.info.mapMark ?? "",
     bgm: runtime.map.info.bgm ?? "",
     bounds: runtime.map.bounds,
+    footholdBounds: runtime.map.footholdBounds,
     backgrounds: runtime.map.backgrounds.length,
     footholds: runtime.map.footholdLines.length,
     ropes: runtime.map.ladderRopes.length,
@@ -1815,6 +2387,7 @@ function updateSummary() {
       facing: runtime.player.facing,
       action: runtime.player.action,
       footholdLayer: runtime.player.footholdLayer,
+      renderLayer: currentPlayerRenderLayer(),
       downJumpControlLock: runtime.player.downJumpControlLock,
       downJumpTargetFootholdId: runtime.player.downJumpTargetFootholdId,
     },
@@ -1827,12 +2400,27 @@ function updateSummary() {
         : null,
       sfxPlayCount: runtime.audioDebug.sfxPlayCount,
     },
+    loading: {
+      active: runtime.loading.active,
+      loaded: runtime.loading.loaded,
+      total: runtime.loading.total,
+      progress: Number((runtime.loading.progress * 100).toFixed(1)),
+    },
+    debug: {
+      overlayEnabled: runtime.debug.overlayEnabled,
+      showRopes: runtime.debug.showRopes,
+      showFootholds: runtime.debug.showFootholds,
+      showLifeMarkers: runtime.debug.showLifeMarkers,
+      transitionAlpha: Number(runtime.transition.alpha.toFixed(3)),
+      portalWarpInProgress: runtime.portalWarpInProgress,
+    },
   };
 
   summaryEl.textContent = JSON.stringify(summary, null, 2);
 }
 
 function update(dt) {
+  tryUsePortal();
   updatePlayer(dt);
   updateFaceAnimation(dt);
   updateCamera(dt);
@@ -1948,21 +2536,38 @@ async function playSfx(soundFile, soundName) {
   }
 }
 
-async function loadMap(mapId) {
+async function loadMap(mapId, spawnPortalName = null, spawnFromPortalTransfer = false) {
+  const loadToken = runtime.mapLoadToken + 1;
+  runtime.mapLoadToken = loadToken;
+
+  runtime.loading.active = true;
+  runtime.loading.total = 0;
+  runtime.loading.loaded = 0;
+  runtime.loading.progress = 0;
+  runtime.loading.label = "Preparing map data...";
+
   try {
     setStatus(`Loading map ${mapId}...`);
 
     const path = mapPathFromId(mapId);
     const raw = await fetchJson(path);
+    if (loadToken !== runtime.mapLoadToken) return;
 
     runtime.mapId = String(mapId).trim();
     runtime.map = parseMapData(raw);
 
+    const spawnPortalByName = spawnPortalName
+      ? runtime.map.portalEntries.find((portal) => portal.name === spawnPortalName)
+      : null;
     const spawnPortal =
-      runtime.map.portalEntries.find((portal) => portal.type === 0) ?? runtime.map.portalEntries[0];
+      spawnPortalByName ??
+      runtime.map.portalEntries.find((portal) => portal.type === 0) ??
+      runtime.map.portalEntries[0];
 
     runtime.player.x = spawnPortal ? spawnPortal.x : 0;
-    runtime.player.y = spawnPortal ? spawnPortal.y : 0;
+    runtime.player.y = spawnPortal
+      ? spawnPortal.y - (spawnFromPortalTransfer ? PORTAL_SPAWN_Y_OFFSET : 0)
+      : 0;
     runtime.player.vx = 0;
     runtime.player.vy = 0;
     runtime.player.onGround = false;
@@ -1983,6 +2588,7 @@ async function loadMap(mapId) {
     runtime.player.action = "stand1";
     runtime.player.frameIndex = 0;
     runtime.player.frameTimer = 0;
+    runtime.lastRenderableCharacterFrame = null;
 
     runtime.faceAnimation.expression = "default";
     runtime.faceAnimation.frameIndex = 0;
@@ -1992,7 +2598,13 @@ async function loadMap(mapId) {
     runtime.camera.x = runtime.player.x;
     runtime.camera.y = runtime.player.y - 130;
 
-    requestCharacterData();
+    await preloadMapAssets(runtime.map, loadToken);
+    if (loadToken !== runtime.mapLoadToken) return;
+
+    runtime.loading.progress = 1;
+    runtime.loading.label = "Assets loaded";
+    runtime.loading.active = false;
+
     playBgmPath(String(runtime.map.info.bgm ?? ""));
 
     const params = new URLSearchParams(window.location.search);
@@ -2001,6 +2613,14 @@ async function loadMap(mapId) {
 
     setStatus(`Loaded map ${runtime.mapId}. Click/hover canvas to control. Controls: ←/→ move, Space jump, ↑ (or ↓ at top) to grab rope, ↑/↓ climb, Space+←/→ jump off rope, ↓ crouch on ground.`);
   } catch (error) {
+    if (loadToken === runtime.mapLoadToken) {
+      runtime.loading.active = false;
+      runtime.loading.label = "";
+      runtime.loading.progress = 0;
+      runtime.loading.total = 0;
+      runtime.loading.loaded = 0;
+    }
+
     setStatus(`Error: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
@@ -2040,7 +2660,10 @@ function bindInput() {
 
     if (event.code === "ArrowLeft" || event.code === "KeyA") runtime.input.left = true;
     if (event.code === "ArrowRight" || event.code === "KeyD") runtime.input.right = true;
-    if (event.code === "ArrowUp" || event.code === "KeyW") runtime.input.up = true;
+    if (event.code === "ArrowUp" || event.code === "KeyW") {
+      runtime.input.up = true;
+      void tryUsePortal(true);
+    }
     if (event.code === "ArrowDown" || event.code === "KeyS") runtime.input.down = true;
 
     if (event.code === "Space") {
@@ -2084,6 +2707,13 @@ chatFormEl.addEventListener("submit", (event) => {
   runtime.player.bubbleExpiresAt = performance.now() + 8000;
   playSfx("UI", "BtMouseOver");
 });
+
+for (const toggle of [debugOverlayToggleEl, debugRopesToggleEl, debugFootholdsToggleEl, debugLifeToggleEl]) {
+  if (!toggle) continue;
+  toggle.addEventListener("change", () => {
+    syncDebugTogglesFromUi();
+  });
+}
 
 audioEnableButtonEl.addEventListener("click", async () => {
   runtime.audioUnlocked = true;

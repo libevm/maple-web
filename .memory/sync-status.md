@@ -1,6 +1,6 @@
 # .memory Sync Status
 
-Last synced: 2026-02-17T17:59:04+11:00
+Last synced: 2026-02-17T18:45:36+11:00
 Status: ✅ Synced
 
 ## Current authoritative memory files
@@ -12,23 +12,24 @@ Status: ✅ Synced
 - `.memory/implementation-plan.md`
 
 ## What was synced in this pass
-1. Investigated portal visibility mismatch via C++ references (read-only):
-   - `MapleStory-Client/Gameplay/MapleMap/Portal.cpp`
-   - `MapleStory-Client/Gameplay/MapleMap/MapPortals.cpp`
-   - `MapleWeb/TypeScript-Client/src/Portal.ts`
-2. Fixed portal rendering/type mapping in `client/web/app.js`:
-   - portal parsing now includes `id` and `image`
-   - corrected portal type-to-visual behavior:
-     - always render: `2`, `4`, `7`, `11`
-     - render only when touched: `10` hidden
-     - do not render: non-visual portal types (`0`, `1`, `3`, etc.)
-   - corrected portal asset path selection:
-     - regular `pv`
-     - hidden `ph/default/portalContinue`
-     - scripted hidden `psh/<image>/portalContinue` with `default` fallback
-3. Documentation/memory updates:
+1. Airborne z-layer/render-layer update in `client/web/app.js`:
+   - added `currentPlayerRenderLayer()`
+   - render layer now resolves dynamically each frame:
+     - climbing => layer `7`
+     - otherwise nearest foothold below current position (`findFootholdBelow`)
+     - fallback to `player.footholdLayer`
+2. Layer-interleaved draw update:
+   - `drawMapLayersWithCharacter()` now uses dynamic render layer instead of only landed foothold layer
+   - improves front/behind transitions while jumping/falling
+3. Debug visibility update:
+   - summary now includes `player.renderLayer` alongside `player.footholdLayer`
+4. Reference scan basis captured:
+   - `MapleStory-Client/Gameplay/Physics/FootholdTree.cpp` (`update_fh`, `get_fhid_below`)
+   - `MapleStory-Client/Character/Char.cpp` (`get_layer`)
+   - `MapleStory-Client/Gameplay/Stage.cpp` (layer-interleaved draw pipeline)
+5. Documentation/memory updates:
    - `.memory/implementation-plan.md`
-   - `docs/pwa-findings.md` (new 17:59 entry)
+   - `docs/pwa-findings.md` (new 18:45 entry)
 
 ## Validation snapshot
 - Automated:
@@ -38,4 +39,4 @@ Status: ✅ Synced
   - ✅ route load `/?mapId=104040000` (HTTP 200)
 
 ## Next expected update point
-- User visual verification of portal parity on maps containing both regular (`pt=2`) and hidden (`pt=10`) portals.
+- User gameplay verification on maps with stacked vertical footholds/foreground objects to confirm jump-time front/behind transitions now match expected behavior.

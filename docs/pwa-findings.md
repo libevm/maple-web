@@ -28,6 +28,305 @@ The docs UI includes sidebar navigation for markdown files under `docs/`.
 
 ---
 
+## 2026-02-17 18:45 (GMT+11)
+### Summary
+- Updated airborne render-layer logic so front/behind ordering changes during jump/fall, not only on landing.
+
+### Files changed
+- `client/web/app.js`
+
+### Functional updates
+- Added `currentPlayerRenderLayer()` to choose draw layer dynamically:
+  - climbing uses layer `7`
+  - otherwise uses nearest foothold below current position (`findFootholdBelow`)
+  - fallback to persisted foothold layer when no foothold candidate is found
+- `drawMapLayersWithCharacter()` now uses this live render layer instead of only settled foothold layer.
+- Debug summary now includes `player.renderLayer` for verification.
+
+### C++ parity references
+- `MapleStory-Client/Gameplay/Physics/FootholdTree.cpp` (`update_fh` / `get_fhid_below`)
+- `MapleStory-Client/Character/Char.cpp` (`get_layer`)
+- `MapleStory-Client/Gameplay/Stage.cpp` (layer-interleaved draw)
+
+### Validation
+- Automated: `bun run ci` ✅
+- Manual route smoke: `CLIENT_WEB_PORT=5210 bun run client:web` + `/?mapId=104040000` returns 200 ✅
+
+## 2026-02-17 18:42 (GMT+11)
+### Summary
+- Added cross-map portal fade transitions and offset spawn placement above destination portal.
+
+### Files changed
+- `client/web/app.js`
+
+### Functional updates
+- Portal transfer UX:
+  - cross-map portal travel now fades out before map load and fades in after load
+  - transition timings: ~180ms fade-out, ~240ms fade-in
+- Destination spawn adjustment:
+  - when arriving from portal transfer, player spawns slightly above target portal (`-24px`)
+  - helps prevent rough foothold geometry from dropping player below expected portal position
+- Added transition runtime state and render overlay:
+  - `runtime.transition.alpha`
+  - `drawTransitionOverlay()` in both loading and world render paths
+- Added transition debug telemetry:
+  - `debug.transitionAlpha`
+  - `debug.portalWarpInProgress`
+
+### Validation
+- Automated: `bun run ci` ✅
+- Manual route smoke: `CLIENT_WEB_PORT=5210 bun run client:web` + `/?mapId=104040000` returns 200 ✅
+
+## 2026-02-17 18:38 (GMT+11)
+### Summary
+- Improved portal `↑` usage reliability and restored map layer/z-based front-object occlusion over the player.
+
+### Files changed
+- `client/web/app.js`
+
+### Functional updates
+- Portal interaction:
+  - added immediate portal-use attempt on `↑/W` keydown
+  - moved portal-use check earlier in update flow (before movement)
+  - expanded portal destination handling:
+    - valid `tm` -> map warp
+    - same-map/invalid-map + valid `tn` -> intramap portal-name warp
+    - fallback to `info.returnMap` when direct destination is unavailable
+  - ignores placeholder destination names like `N/A`
+- Render layering:
+  - map layer draw now interleaves character by foothold layer (`drawMapLayersWithCharacter`)
+  - tiles now parse/sort by `zM` (stable tie by node id)
+  - objects now stable-sort by `z` (tie by node id)
+  - higher map layers now render in front of player as expected
+
+### C++ / reference parity sources
+- `MapleStory-Client/Gameplay/Stage.cpp`
+- `MapleStory-Client/Gameplay/MapleMap/MapPortals.cpp`
+- `MapleStory-Client/Gameplay/MapleMap/Portal.cpp`
+- `MapleStory-Client/Gameplay/MapleMap/MapTilesObjs.cpp`
+- `MapleStory-Client/Gameplay/MapleMap/Obj.cpp`
+- `MapleStory-Client/Gameplay/MapleMap/Tile.cpp`
+- `MapleWeb/TypeScript-Client/src/MapleMap.ts`
+
+### Validation
+- Automated: `bun run ci` ✅
+- Manual route smoke: `CLIENT_WEB_PORT=5210 bun run client:web` + `/?mapId=104040000` returns 200 ✅
+
+## 2026-02-17 18:28 (GMT+11)
+### Summary
+- Implemented portal interaction on `↑` so standing on a portal now triggers warps.
+
+### Files changed
+- `client/web/app.js`
+
+### Functional updates
+- Added runtime portal interaction state:
+  - `portalCooldownUntil`
+  - `portalWarpInProgress`
+- Added portal interaction helpers:
+  - `findUsablePortalAtPlayer(map)`
+  - `movePlayerToPortalInCurrentMap(targetPortalName)`
+  - `tryUsePortal()`
+- Update loop now checks portal usage each frame while `↑` is held.
+- Added short anti-repeat cooldown (~400ms).
+- `loadMap(...)` now accepts optional `spawnPortalName` so intermap portals can place player at target portal name (`tn`) when available.
+
+### C++ parity references
+- `MapleStory-Client/Gameplay/Stage.cpp` (`check_portals`)
+- `MapleStory-Client/Gameplay/MapleMap/MapPortals.h` (`WARPCD`)
+
+### Validation
+- Automated: `bun run ci` ✅
+- Manual route smoke: `CLIENT_WEB_PORT=5210 bun run client:web` + `/?mapId=104040000` returns 200 ✅
+
+## 2026-02-17 18:25 (GMT+11)
+### Summary
+- Moved debug controls/logs into a dedicated panel and split overlay controls into independent toggles.
+
+### Files changed
+- `client/web/index.html`
+- `client/web/styles.css`
+- `client/web/app.js`
+
+### Functional updates
+- Added dedicated debug panel (`#debug-panel`) with live debug log (`#map-summary`).
+- Added separate overlay toggles:
+  - master overlay on/off
+  - ropes
+  - footholds
+  - life markers
+- Runtime debug state now tracks each toggle independently.
+- Render pass now draws each debug layer independently based on its own toggle.
+- Sub-toggles are disabled when master overlay is off.
+- Debug summary includes full toggle state.
+
+### Validation
+- Automated: `bun run ci` ✅
+- Manual route smoke: `CLIENT_WEB_PORT=5210 bun run client:web` + `/?mapId=104040000` returns 200 ✅
+
+## 2026-02-17 18:22 (GMT+11)
+### Summary
+- Added a checkbox to toggle debug overlay drawings on the game canvas.
+
+### Files changed
+- `client/web/index.html`
+- `client/web/app.js`
+
+### Functional updates
+- New UI control: `#debug-overlay-toggle` (checked by default).
+- Runtime flag: `runtime.debugOverlayEnabled`.
+- Render gating:
+  - when enabled: draws rope guides + foothold/marker overlay
+  - when disabled: hides those debug drawings
+- Added debug summary field:
+  - `debug.overlayEnabled`
+
+### Validation
+- Automated: `bun run ci` ✅
+- Manual route smoke: `CLIENT_WEB_PORT=5210 bun run client:web` + `/?mapId=104040000` returns 200 ✅
+
+## 2026-02-17 18:19 (GMT+11)
+### Summary
+- Added blocking loading screen with progress bar until required map/character assets are loaded.
+
+### Files changed
+- `client/web/app.js`
+
+### Functional updates
+- Added runtime loading state:
+  - `loading.active`, `loading.total`, `loading.loaded`, `loading.progress`, `loading.label`
+  - `mapLoadToken` for race-safe async map loads
+- Asset pipeline now supports awaited preloading:
+  - `requestMeta()` and `requestImageByKey()` now return promises
+  - async metadata loaders extracted for background/tile/object/portal
+- Added preload flow:
+  - map tasks (backgrounds/tiles/objects/portal frames)
+  - initial character tasks (`stand1`, `walk1`, `jump`, `ladder`, `rope`, `prone`, `sit` frame 0)
+  - concurrent worker preload with live progress updates
+- Added `drawLoadingScreen()` and render gating:
+  - while loading is active, canvas shows loading overlay/progress bar
+  - world draw is blocked until preload completion
+- `loadMap()` now awaits preload completion before map ready status/BGM finalization.
+
+### Validation
+- Automated: `bun run ci` ✅
+- Manual route smoke: `CLIENT_WEB_PORT=5210 bun run client:web` + `/?mapId=104040000` returns 200 ✅
+
+## 2026-02-17 18:13 (GMT+11)
+### Summary
+- Implemented C++-style background parallax for scene/cloud layers.
+
+### Files changed
+- `client/web/app.js`
+
+### Functional updates
+- Reworked `drawBackgroundLayer()` to screen-space background rendering with type-aware behavior.
+- Added parallax/motion behavior using `rx/ry` and background `type`:
+  - static parallax for non-mobile types
+  - continuous drift for mobile types (`4/5/6/7`)
+- Kept tiled background coverage semantics (`+3` viewport margin) using `cx/cy`.
+- Added flip-aware screen draw helper: `drawScreenImage(...)`.
+- Back layer now fills black for maps with `blackBackground` marker.
+
+### C++ parity references
+- `MapleStory-Client/Gameplay/MapleMap/MapBackgrounds.cpp`
+
+### Validation
+- Automated: `bun run ci` ✅
+- Manual route smoke: `CLIENT_WEB_PORT=5210 bun run client:web` + `/?mapId=104040000` returns 200 ✅
+
+## 2026-02-17 18:10 (GMT+11)
+### Summary
+- Added slope jump-off push impulse so jumping from inclines pushes character away from slope.
+
+### Files changed
+- `client/web/app.js`
+
+### Functional updates
+- Added `applySlopeJumpTakeoffVelocity(hspeed, slope, moveDir)`:
+  - applies C++-style slope drag first
+  - when no horizontal input and takeoff would be near stationary, injects downslope push (`slope * 120`)
+- Normal jump path now uses this takeoff helper.
+- Outcome: slope jump-off now has a visible away-from-slope horizontal launch response.
+
+### Why this was needed
+- The web debug client’s simplified ground velocity model under-represented C++ continuous slope/inertia behavior at jump takeoff.
+- This patch restores expected feel without replacing the whole movement integrator.
+
+### Validation
+- Automated: `bun run ci` ✅
+- Manual route smoke: `CLIENT_WEB_PORT=5210 bun run client:web` + `/?mapId=104040000` returns 200 ✅
+
+## 2026-02-17 18:08 (GMT+11)
+### Summary
+- Added slope-aware jump takeoff adjustment based on C++ normal-ground physics terms.
+
+### Files changed
+- `client/web/app.js`
+
+### Functional updates
+- Added C++-inspired constants for ground slope drag:
+  - `CPP_GROUND_FRICTION = 0.5`
+  - `CPP_SLOPE_FACTOR = 0.1`
+  - `CPP_GROUND_SLIP = 3.0`
+- Added helpers:
+  - `footholdSlope(foothold)`
+  - `applyCppGroundSlopeDrag(hspeed, slope)`
+- On normal jump (non down-jump), when on a sloped foothold:
+  - horizontal takeoff velocity now gets a slope/friction adjustment before lift-off
+  - slope contribution is clamped to `[-0.5, 0.5]` (matching C++ behavior)
+
+### C++ parity references
+- `MapleStory-Client/Gameplay/Physics/Physics.cpp` (`move_normal`)
+- `MapleStory-Client/Gameplay/Physics/Foothold.cpp` (`slope`)
+
+### Validation
+- Automated: `bun run ci` ✅
+- Manual route smoke: `CLIENT_WEB_PORT=5210 bun run client:web` + `/?mapId=104040000` returns 200 ✅
+
+## 2026-02-17 18:05 (GMT+11)
+### Summary
+- Clamped horizontal camera/render span to foothold left/right extents.
+
+### Files changed
+- `client/web/app.js`
+
+### Functional updates
+- Added `map.footholdBounds` (`minX`, `maxX`) derived from foothold endpoints during map parse.
+- Updated `updateCamera()` horizontal clamp to keep camera center within foothold render range:
+  - `minCenterX = footholdMinX + viewportHalfWidth`
+  - `maxCenterX = footholdMaxX - viewportHalfWidth`
+- If foothold span is narrower than viewport, camera now centers on foothold midpoint.
+- Debug summary now includes `footholdBounds` for verification.
+
+### Validation
+- Automated: `bun run ci` ✅
+- Manual route smoke: `CLIENT_WEB_PORT=5210 bun run client:web` + `/?mapId=104040000` returns 200 ✅
+
+## 2026-02-17 18:02 (GMT+11)
+### Summary
+- Fixed intermittent character render blip where the sprite vanished for a frame and reappeared.
+
+### Files changed
+- `client/web/app.js`
+
+### Functional updates
+- Added render fallback state: `runtime.lastRenderableCharacterFrame`.
+- Refactored character composition into `composeCharacterPlacements(...)`.
+- `drawCharacter()` now:
+  - renders current frame when available
+  - falls back to last renderable frame if current frame assets are not yet ready
+  - updates fallback snapshot once current frame is renderable again
+- Fallback state resets on map load.
+
+### Why this fixes the issue
+- Previous behavior returned early when the current frame had no loaded `body` image, causing a one-frame disappearance.
+- Fallback keeps a valid drawable frame through transient asset cache gaps.
+
+### Validation
+- Automated: `bun run ci` ✅
+- Manual route smoke: `CLIENT_WEB_PORT=5210 bun run client:web` + `/?mapId=104040000` returns 200 ✅
+
 ## 2026-02-17 17:59 (GMT+11)
 ### Summary
 - Fixed portal visibility/render mapping: visible portals were hidden and hidden portals were visible.

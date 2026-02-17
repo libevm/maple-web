@@ -525,6 +525,237 @@ No step is complete unless both pass.
   - Validation status:
     - ✅ `bun run ci`
     - ✅ `CLIENT_WEB_PORT=5210 bun run client:web` route smoke (`GET /?mapId=104040000` => 200)
+- 2026-02-17: Mitigated intermittent one-frame character disappearance (render blip).
+  - Root cause:
+    - `drawCharacter()` skipped rendering when current animation frame body image was not yet ready in cache.
+    - this could occur transiently on frame/action transitions and appear as instant vanish/reappear.
+  - Updated `client/web/app.js`:
+    - added `runtime.lastRenderableCharacterFrame` fallback state
+    - refactored character composition into `composeCharacterPlacements(action, frameIndex, player, flipped)`
+    - `drawCharacter()` now:
+      - tries current frame composition first
+      - falls back to last renderable frame when current frame is temporarily unavailable
+      - updates fallback state once current frame is renderable again
+    - resets fallback state on map load
+  - Behavior result:
+    - transient asset-load frame gaps no longer cause visible character blips.
+  - Validation status:
+    - ✅ `bun run ci`
+    - ✅ `CLIENT_WEB_PORT=5210 bun run client:web` route smoke (`GET /?mapId=104040000` => 200)
+- 2026-02-17: Clamped horizontal camera render range to foothold extents.
+  - Updated `client/web/app.js`:
+    - map parsing now stores `footholdBounds` (`minX`/`maxX`) derived from foothold endpoints
+    - `updateCamera()` now clamps `camera.x` to `[footholdMinX + viewportHalfWidth, footholdMaxX - viewportHalfWidth]`
+    - when map foothold width is narrower than viewport, camera centers on foothold midpoint
+    - debug summary now includes `footholdBounds`
+  - Behavior result:
+    - horizontal view no longer scrolls/renders beyond leftmost/rightmost foothold extents.
+  - Validation status:
+    - ✅ `bun run ci`
+    - ✅ `CLIENT_WEB_PORT=5210 bun run client:web` route smoke (`GET /?mapId=104040000` => 200)
+- 2026-02-17: Added C++-inspired slope takeoff adjustment for normal jumps.
+  - Reference scan (read-only) findings:
+    - C++ `Physics::move_normal()` applies slope/friction term using:
+      - `FRICTION = 0.5`
+      - `SLOPEFACTOR = 0.1`
+      - `GROUNDSLIP = 3.0`
+      - clamped slope contribution (`[-0.5, 0.5]`)
+    - C++ `Foothold::slope()` is `vdelta / hdelta`; this influences on-ground horizontal behavior before/at takeoff.
+  - Updated `client/web/app.js`:
+    - added constants mirroring C++ normal-ground slope drag params
+    - added helpers:
+      - `footholdSlope(foothold)`
+      - `applyCppGroundSlopeDrag(hspeed, slope)`
+    - on normal jump (non down-jump), apply C++-style slope drag to `player.vx` at takeoff when standing on sloped foothold
+  - Behavior result:
+    - jump-off from slopes now carries a more C++-like horizontal takeoff response instead of flat constant launch speed.
+  - Validation status:
+    - ✅ `bun run ci`
+    - ✅ `CLIENT_WEB_PORT=5210 bun run client:web` route smoke (`GET /?mapId=104040000` => 200)
+- 2026-02-17: Added downslope "push away" impulse on slope jump-off to mirror C++ feel in simplified web physics.
+  - Context:
+    - web debug client still uses simplified ground movement (direct vx assignment), so C++ continuous slope/inertia effects are underrepresented at jump takeoff.
+  - Updated `client/web/app.js`:
+    - added `applySlopeJumpTakeoffVelocity(hspeed, slope, moveDir)`
+      - starts from C++-style slope drag computation
+      - if no horizontal input and slope jump would otherwise be near-stationary, applies a downslope impulse (`slope * 120`) to push character away from incline
+    - normal jump path now uses this helper instead of slope-drag-only helper
+  - Behavior result:
+    - jumping from sloped footholds now includes visible away-from-slope horizontal push even without held left/right, matching expected C++ feel more closely.
+  - Validation status:
+    - ✅ `bun run ci`
+    - ✅ `CLIENT_WEB_PORT=5210 bun run client:web` route smoke (`GET /?mapId=104040000` => 200)
+- 2026-02-17: Added C++-style background parallax for scene/cloud layers.
+  - Reference scan (read-only) findings:
+    - C++ `Gameplay/MapleMap/MapBackgrounds.cpp`:
+      - background draw uses `rx/ry` parallax offsets relative to view position
+      - moving background types (`4/5/6/7`) use continuous motion (`hspeed = rx/16`, `vspeed = ry/16`)
+      - tiled types derive repeat counts from viewport dimensions and `cx/cy`
+  - Updated `client/web/app.js`:
+    - reworked `drawBackgroundLayer()` into screen-space parallax renderer
+    - implemented type-aware parallax/motion for scene/cloud backgrounds:
+      - static parallax: `rx/ry` shift based on camera/view offset
+      - moving backgrounds: continuous drift for `HMOVE*/VMOVE*` types
+    - preserved C++-style tiled repeat coverage (`+3` margin) using `cx/cy`
+    - added `drawScreenImage()` helper for flip-aware screen-space background draws
+    - enabled black fill for maps marked with empty background set (`blackBackground`) on back layer pass
+  - Behavior result:
+    - scene and cloud layers now move with depth/parallax instead of fixed camera lock.
+  - Validation status:
+    - ✅ `bun run ci`
+    - ✅ `CLIENT_WEB_PORT=5210 bun run client:web` route smoke (`GET /?mapId=104040000` => 200)
+- 2026-02-17: Added blocking loading screen with progress bar until required map assets are ready.
+  - Updated `client/web/app.js`:
+    - extended asset loaders to support awaited preloading:
+      - `requestMeta()` now returns a promise and caches loaded metadata
+      - `requestImageByKey()` now returns a promise and caches loaded images
+      - extracted async loaders for background/tile/object/portal metadata
+    - added map preload pipeline:
+      - `buildMapAssetPreloadTasks(map)` for map scene assets (backgrounds, tiles, objects, portal frames)
+      - `addCharacterPreloadTasks(...)` for initial character action assets
+      - `preloadMapAssets(map, loadToken)` with concurrent workers and live progress updates
+    - added runtime loading state and race-safe map load tokening:
+      - `runtime.loading` (`active/total/loaded/progress/label`)
+      - `runtime.mapLoadToken` to avoid stale async load updates
+    - added `drawLoadingScreen()` and made `render()` block world draw while loading is active
+    - updated `loadMap()` to await preloading before finalizing map ready state/BGM/play controls message
+    - debug summary now includes `loading` progress fields
+  - Behavior result:
+    - users now see a loading screen/progress bar and the world only appears when required assets are loaded.
+  - Validation status:
+    - ✅ `bun run ci`
+    - ✅ `CLIENT_WEB_PORT=5210 bun run client:web` route smoke (`GET /?mapId=104040000` => 200)
+- 2026-02-17: Added UI checkbox to toggle debug overlay drawings (footholds/ropes/markers).
+  - Updated `client/web/index.html`:
+    - added `#debug-overlay-toggle` checkbox (default checked)
+  - Updated `client/web/app.js`:
+    - added `runtime.debugOverlayEnabled` state (synced from checkbox)
+    - `render()` now conditionally draws `drawRopeGuides()` and `drawFootholdsAndMarkers()` based on toggle state
+    - added checkbox change listener to enable/disable overlay at runtime
+    - debug summary now includes `debug.overlayEnabled`
+  - Behavior result:
+    - user can disable in-canvas debug drawings without affecting normal scene/character/portal rendering.
+  - Validation status:
+    - ✅ `bun run ci`
+    - ✅ `CLIENT_WEB_PORT=5210 bun run client:web` route smoke (`GET /?mapId=104040000` => 200)
+- 2026-02-17: Created dedicated debug panel section and split overlay controls into independent toggles.
+  - Updated `client/web/index.html`:
+    - moved debug controls/log area into dedicated `<aside id="debug-panel">`
+    - added separate toggles:
+      - `Enable overlay` (`#debug-overlay-toggle`)
+      - `Ropes` (`#debug-ropes-toggle`)
+      - `Footholds` (`#debug-footholds-toggle`)
+      - `Life markers` (`#debug-life-toggle`)
+    - kept `#map-summary` inside this debug panel as the live logs/state view
+  - Updated `client/web/styles.css`:
+    - added dedicated debug panel/toggle styling for clearer separation from gameplay canvas
+  - Updated `client/web/app.js`:
+    - replaced single debug flag with structured runtime debug state:
+      - `debug.overlayEnabled`
+      - `debug.showRopes`
+      - `debug.showFootholds`
+      - `debug.showLifeMarkers`
+    - split debug drawing functions:
+      - `drawFootholdOverlay()`
+      - `drawLifeMarkers()`
+    - render now gates each overlay independently by toggle state
+    - checkbox synchronization helper `syncDebugTogglesFromUi()` keeps runtime/debug UI in sync and disables sub-toggles when overlay master is off
+    - debug summary now includes all toggle states
+  - Behavior result:
+    - debug tools/logs now live in a dedicated section and each overlay category can be toggled independently.
+  - Validation status:
+    - ✅ `bun run ci`
+    - ✅ `CLIENT_WEB_PORT=5210 bun run client:web` route smoke (`GET /?mapId=104040000` => 200)
+- 2026-02-17: Implemented portal "up key" interaction (intramap + intermap warps) per C++ behavior.
+  - Reference scan (read-only) findings:
+    - C++ `Stage::check_portals()` uses portal bounds + cooldown and supports:
+      - intramap warp to target portal name
+      - intermap warp to target map id
+    - C++ `MapPortals::WARPCD` is short (~48 ticks) to avoid repeated immediate warp spam.
+  - Updated `client/web/app.js`:
+    - added portal interaction state:
+      - `runtime.portalCooldownUntil`
+      - `runtime.portalWarpInProgress`
+    - added portal helpers:
+      - `findUsablePortalAtPlayer(map)`
+      - `movePlayerToPortalInCurrentMap(targetPortalName)`
+      - `tryUsePortal()`
+    - update loop now calls `tryUsePortal()` so holding/pressing `↑` while in portal bounds triggers warp
+    - added short cooldown (`~400ms`) between portal uses
+    - extended `loadMap(mapId, spawnPortalName)` so intermap warps can spawn at target portal name when present
+  - Behavior result:
+    - pressing `↑` on a valid portal now warps player either within the same map (to `tn`) or to destination map (`tm`).
+  - Validation status:
+    - ✅ `bun run ci`
+    - ✅ `CLIENT_WEB_PORT=5210 bun run client:web` route smoke (`GET /?mapId=104040000` => 200)
+- 2026-02-17: Hardened portal `↑` interaction and restored layer-aware occlusion for map objects in front of player.
+  - Reference scan (read-only) findings:
+    - C++ `Stage::update` calls `check_portals()` during `UP` key handling and uses portal bounds/cooldown (`Stage.cpp`, `MapPortals.h/.cpp`, `Portal.cpp`).
+    - C++ map drawing is layer-interleaved (`Stage::draw`), allowing higher map layers to render in front of player.
+    - C++/half-web map tile/object ordering relies on WZ z fields (`Obj::z`, tile `z` / `zM`).
+  - Updated `client/web/app.js` (portal reliability):
+    - added portal target helpers:
+      - `isValidPortalTargetMapId(...)`
+      - `normalizedPortalTargetName(...)`
+    - broadened usable-portal detection to include named same-map destinations even when `tm` is script-invalid
+    - `tryUsePortal(force = false)` now:
+      - supports immediate keydown-triggered attempts (`force`)
+      - runs before movement each frame (prevents missing portal due same-frame movement)
+      - supports intramap fallback by `tn`
+      - falls back to `info.returnMap` when portal has no valid direct map target
+      - ignores placeholder portal target names like `N/A`
+    - keydown handler now invokes `tryUsePortal(true)` on `↑/W`
+  - Updated `client/web/app.js` (front-object rendering):
+    - map parsing now captures and sorts by z metadata from dump:
+      - tiles: `zM` + stable tie by node id
+      - objects: `z` + stable tie by node id
+    - replaced monolithic `drawMapLayers()` with:
+      - `drawMapLayer(layer)`
+      - `drawMapLayersWithCharacter()` (draws character at current foothold layer, fallback once if unresolved)
+    - render pass now uses layer-interleaved map/character draw so higher layers can occlude player.
+  - Behavior result:
+    - pressing `↑` on portal bounds now triggers destination changes more reliably (same-map warp, target map warp, or return-map fallback).
+    - foreground layer objects/tiles now appear in front of character when layer/z ordering dictates.
+  - Validation status:
+    - ✅ `bun run ci`
+    - ✅ `CLIENT_WEB_PORT=5210 bun run client:web` route smoke (`GET /?mapId=104040000` => 200)
+- 2026-02-17: Added portal transfer spawn offset and fade in/out transition for cross-map portal travel.
+  - Updated `client/web/app.js`:
+    - added portal transition constants:
+      - `PORTAL_SPAWN_Y_OFFSET = 24`
+      - `PORTAL_FADE_OUT_MS = 180`
+      - `PORTAL_FADE_IN_MS = 240`
+    - added runtime transition state: `runtime.transition` (`alpha`, `active`)
+    - added fade helpers:
+      - `waitForAnimationFrame()`
+      - `fadeScreenTo(targetAlpha, durationMs)`
+      - `runPortalMapTransition(targetMapId, targetPortalName)`
+    - `tryUsePortal()` now uses `runPortalMapTransition(...)` for cross-map portal transfers (`tm` and `returnMap` fallback)
+    - `loadMap(...)` extended to accept `spawnFromPortalTransfer` and apply destination spawn Y offset above portal
+    - added `drawTransitionOverlay()` and applied overlay in `render()` for both loading and world draw paths
+    - debug summary now reports `transitionAlpha` and `portalWarpInProgress`
+  - Behavior result:
+    - entering portal to another map fades out, loads, then fades in.
+    - arrival position is slightly above destination portal to reduce bumpy foothold under-spawn issues.
+  - Validation status:
+    - ✅ `bun run ci`
+    - ✅ `CLIENT_WEB_PORT=5210 bun run client:web` route smoke (`GET /?mapId=104040000` => 200)
+- 2026-02-17: Updated airborne render-layer selection so character front/behind ordering reacts during jumps.
+  - Reference scan (read-only) findings:
+    - C++ foothold tree updates current foothold candidate via `get_fhid_below(x, y)` every physics tick (`FootholdTree::update_fh`).
+    - C++ player draw layer uses character foothold-layer state (`Char::get_layer`, `Stage::draw` interleaving).
+  - Updated `client/web/app.js`:
+    - added `currentPlayerRenderLayer()`:
+      - uses climb layer `7` while climbing
+      - otherwise probes nearest foothold below player each frame via `findFootholdBelow(...)`
+      - falls back to persisted `player.footholdLayer` if no foothold is found
+    - `drawMapLayersWithCharacter()` now uses `currentPlayerRenderLayer()` instead of only settled foothold layer
+    - debug summary now includes `player.renderLayer` in addition to `player.footholdLayer`
+  - Behavior result:
+    - while jumping/falling, player front/behind ordering now updates against map layers before landing.
+  - Validation status:
+    - ✅ `bun run ci`
+    - ✅ `CLIENT_WEB_PORT=5210 bun run client:web` route smoke (`GET /?mapId=104040000` => 200)
 
 ---
 

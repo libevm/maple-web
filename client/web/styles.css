@@ -53,6 +53,33 @@ button {
   border-radius: 10px;
 }
 
+#debug-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#debug-panel h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.debug-toggles {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.debug-toggles label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.debug-toggles input {
+  min-width: auto;
+}
+
 #map-summary {
   margin: 0;
   padding: 12px;
