@@ -23,6 +23,12 @@ const audioEnableButtonEl = document.getElementById("audio-enable-button");
 const debugToggleEl = document.getElementById("debug-toggle");
 const debugPanelEl = document.getElementById("debug-panel");
 const debugCloseEl = document.getElementById("debug-close");
+const settingsButtonEl = document.getElementById("settings-button");
+const settingsModalEl = document.getElementById("settings-modal");
+const settingsCloseEl = document.getElementById("settings-close");
+const settingsBgmToggleEl = document.getElementById("settings-bgm-toggle");
+const settingsSfxToggleEl = document.getElementById("settings-sfx-toggle");
+const settingsFixed169El = document.getElementById("settings-fixed-169");
 const canvasEl = document.getElementById("map-canvas");
 const ctx = canvasEl.getContext("2d");
 
@@ -78,6 +84,9 @@ const CHAT_BUBBLE_HORIZONTAL_PADDING = 8;
 const CHAT_BUBBLE_VERTICAL_PADDING = 6;
 const CHAT_BUBBLE_STANDARD_WIDTH_MULTIPLIER = 3;
 const TELEPORT_PRESET_CACHE_KEY = "mapleweb.debug.teleportPreset.v1";
+const SETTINGS_CACHE_KEY = "mapleweb.settings.v1";
+const FIXED_16_9_WIDTH = 1280;
+const FIXED_16_9_HEIGHT = 720;
 
 const runtime = {
   map: null,
@@ -134,6 +143,11 @@ const runtime = {
     showLifeMarkers: true,
     aspectMode: ASPECT_MODE_DYNAMIC,
     mouseFly: false,
+  },
+  settings: {
+    bgmEnabled: true,
+    sfxEnabled: true,
+    fixed169: true,
   },
   mouseWorld: { x: 0, y: 0 },
   characterData: null,
@@ -691,9 +705,63 @@ function soundPathFromName(soundFile) {
   return `/resources/Sound.wz/${normalized}.json`;
 }
 
+function loadSettings() {
+  try {
+    const cached = localStorage.getItem(SETTINGS_CACHE_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (typeof parsed.bgmEnabled === "boolean") runtime.settings.bgmEnabled = parsed.bgmEnabled;
+      if (typeof parsed.sfxEnabled === "boolean") runtime.settings.sfxEnabled = parsed.sfxEnabled;
+      if (typeof parsed.fixed169 === "boolean") runtime.settings.fixed169 = parsed.fixed169;
+    }
+  } catch (_) {}
+}
+
+function saveSettings() {
+  try {
+    localStorage.setItem(SETTINGS_CACHE_KEY, JSON.stringify(runtime.settings));
+  } catch (_) {}
+}
+
+function syncSettingsToUI() {
+  if (settingsBgmToggleEl) settingsBgmToggleEl.checked = runtime.settings.bgmEnabled;
+  if (settingsSfxToggleEl) settingsSfxToggleEl.checked = runtime.settings.sfxEnabled;
+  if (settingsFixed169El) settingsFixed169El.checked = runtime.settings.fixed169;
+}
+
+function applyFixed169() {
+  const wrapper = document.querySelector(".canvas-wrapper");
+  if (!wrapper) return;
+
+  if (runtime.settings.fixed169) {
+    wrapper.classList.add("fixed-169");
+  } else {
+    wrapper.classList.remove("fixed-169");
+  }
+  syncCanvasResolution();
+}
+
 function syncCanvasResolution() {
-  const nextWidth = Math.max(MIN_CANVAS_WIDTH, window.innerWidth || DEFAULT_CANVAS_WIDTH);
-  const nextHeight = Math.max(MIN_CANVAS_HEIGHT, window.innerHeight || DEFAULT_CANVAS_HEIGHT);
+  let nextWidth, nextHeight;
+
+  if (runtime.settings.fixed169) {
+    const vw = window.innerWidth || DEFAULT_CANVAS_WIDTH;
+    const vh = window.innerHeight || DEFAULT_CANVAS_HEIGHT;
+    // Fit 16:9 within viewport
+    if (vw / vh > 16 / 9) {
+      nextHeight = vh;
+      nextWidth = Math.round(vh * 16 / 9);
+    } else {
+      nextWidth = vw;
+      nextHeight = Math.round(vw * 9 / 16);
+    }
+  } else {
+    nextWidth = window.innerWidth || DEFAULT_CANVAS_WIDTH;
+    nextHeight = window.innerHeight || DEFAULT_CANVAS_HEIGHT;
+  }
+
+  nextWidth = Math.max(MIN_CANVAS_WIDTH, nextWidth);
+  nextHeight = Math.max(MIN_CANVAS_HEIGHT, nextHeight);
 
   if (canvasEl.width === nextWidth && canvasEl.height === nextHeight) {
     return;
@@ -3416,7 +3484,7 @@ async function playBgmPath(bgmPath) {
 
   runtime.currentBgmPath = bgmPath;
   runtime.audioDebug.lastBgm = bgmPath;
-  if (!runtime.audioUnlocked) return;
+  if (!runtime.audioUnlocked || !runtime.settings.bgmEnabled) return;
 
   const [soundFile, soundName] = bgmPath.split("/");
   if (!soundFile || !soundName) return;
@@ -3451,7 +3519,7 @@ async function playSfx(soundFile, soundName) {
   runtime.audioDebug.lastSfxAtMs = performance.now();
   runtime.audioDebug.sfxPlayCount += 1;
 
-  if (!runtime.audioUnlocked) return;
+  if (!runtime.audioUnlocked || !runtime.settings.sfxEnabled) return;
 
   try {
     const dataUri = await requestSoundDataUri(soundFile, soundName);
@@ -3613,10 +3681,18 @@ function bindInput() {
       }
     }
 
-    if (event.code === "Escape" && runtime.chat.inputActive) {
-      event.preventDefault();
-      closeChatInput();
-      return;
+    if (event.code === "Escape") {
+      if (runtime.chat.inputActive) {
+        event.preventDefault();
+        closeChatInput();
+        return;
+      }
+      if (settingsModalEl && !settingsModalEl.classList.contains("hidden")) {
+        event.preventDefault();
+        settingsModalEl.classList.add("hidden");
+        canvasEl.focus();
+        return;
+      }
     }
 
     if (event.code === "Space" && event.ctrlKey) {
@@ -3754,6 +3830,9 @@ audioEnableButtonEl.addEventListener("click", async () => {
   }
 });
 
+loadSettings();
+syncSettingsToUI();
+applyFixed169();
 initializeTeleportPresetInputs();
 initializeStatInputs();
 initChatLogResize();
@@ -3767,6 +3846,46 @@ debugCloseEl?.addEventListener("click", () => {
   debugPanelEl?.classList.add("hidden");
   canvasEl.focus();
 });
+
+// ── Settings modal ──
+settingsButtonEl?.addEventListener("click", () => {
+  settingsModalEl?.classList.toggle("hidden");
+});
+
+settingsCloseEl?.addEventListener("click", () => {
+  settingsModalEl?.classList.add("hidden");
+  canvasEl.focus();
+});
+
+settingsBgmToggleEl?.addEventListener("change", () => {
+  runtime.settings.bgmEnabled = settingsBgmToggleEl.checked;
+  saveSettings();
+  if (!runtime.settings.bgmEnabled && runtime.bgmAudio) {
+    runtime.bgmAudio.pause();
+  } else if (runtime.settings.bgmEnabled && runtime.audioUnlocked && runtime.currentBgmPath) {
+    playBgmPath(runtime.currentBgmPath);
+  }
+});
+
+settingsSfxToggleEl?.addEventListener("change", () => {
+  runtime.settings.sfxEnabled = settingsSfxToggleEl.checked;
+  saveSettings();
+});
+
+settingsFixed169El?.addEventListener("change", () => {
+  runtime.settings.fixed169 = settingsFixed169El.checked;
+  saveSettings();
+  applyFixed169();
+});
+
+// Close settings on click outside modal content
+settingsModalEl?.addEventListener("click", (e) => {
+  if (e.target === settingsModalEl) {
+    settingsModalEl.classList.add("hidden");
+    canvasEl.focus();
+  }
+});
+
 bindInput();
 requestAnimationFrame(tick);
 
