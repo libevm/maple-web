@@ -28,6 +28,26 @@ The docs UI includes sidebar navigation for markdown files under `docs/`.
 
 ---
 
+## 2026-02-18 08:35 (GMT+11)
+### Summary
+- Fixed parallax background rendering for dynamic viewport sizes (any browser window/aspect ratio).
+
+### Files changed
+- `client/web/app.js`
+
+### Problem
+- Parallax shift formula used `canvasEl.width / 2` as the reference offset, but WZ background `rx/ry` values were tuned for the original 800×600 MapleStory resolution. On wider screens (1920×1080, etc.), parallax shifted too much, causing visible gaps and misaligned layers.
+
+### Fix
+- Added `BG_REFERENCE_WIDTH = 800`, `BG_REFERENCE_HEIGHT = 600` constants
+- Parallax calculation now uses the fixed reference half-size (400/300) for the `rx/ry` shift formula, matching C++ `WOFFSET/HOFFSET`
+- Result is offset by `(screenHalf - refHalf)` to center on the actual screen
+- Tiling coverage still uses actual canvas dimensions — no gaps on any screen size
+- Mobile backgrounds (type 4–7) continue to use actual screen half for proper scrolling
+
+### Validation
+- `bun run ci` ✅, route smoke ✅
+
 ## 2026-02-18 08:12 (GMT+11)
 ### Summary
 - In-canvas chat system matching C++ UIChatBar: Enter toggles chat input at bottom of canvas, message history overlay with expand/collapse.

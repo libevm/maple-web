@@ -12,6 +12,13 @@ Every step includes:
 No step is complete unless both pass.
 
 ## Execution Status (Live)
+- 2026-02-18: Fixed parallax backgrounds for dynamic viewport sizes.
+  - Reference: C++ `MapBackgrounds.cpp` uses `WOFFSET = VWIDTH/2` (800/2=400) for parallax shift formula
+  - Problem: old code used actual canvas half-width for parallax, causing over-shifted backgrounds on wide screens
+  - Fix: parallax math now uses fixed `BG_REFERENCE_WIDTH=800, BG_REFERENCE_HEIGHT=600` for the rx/ry shift calculation, then offsets by `(screenHalf - refHalf)` to center on actual screen
+  - Tiling coverage still uses actual canvas dimensions (no gaps on any screen size)
+  - Formula: `shiftX = rx * (refHalfW - camX) / 100 + refHalfW + (screenHalfW - refHalfW)`
+  - ✅ `bun run ci`, ✅ route smoke
 - 2026-02-18: In-canvas chat system matching C++ UIChatBar behavior.
   - Reference scan (read-only):
     - `MapleStory-Client/IO/UITypes/UIChatBar.cpp` — chat bar with input field, message history, Enter toggles input

@@ -56,6 +56,8 @@ const PORTAL_SCROLL_MAX_MS = 560;
 const PORTAL_SCROLL_SPEED_PX_PER_SEC = 3200;
 const DEFAULT_CANVAS_WIDTH = 1280;
 const DEFAULT_CANVAS_HEIGHT = 720;
+const BG_REFERENCE_WIDTH = 800;
+const BG_REFERENCE_HEIGHT = 600;
 const MIN_CANVAS_WIDTH = 640;
 const MIN_CANVAS_HEIGHT = 320;
 const ASPECT_MODE_DYNAMIC = "dynamic";
@@ -2465,16 +2467,24 @@ function drawScreenImage(image, x, y, flipped) {
 function drawBackgroundLayer(frontFlag) {
   if (!runtime.map) return;
 
-  const halfW = canvasEl.width / 2;
-  const halfH = canvasEl.height / 2;
-  const viewX = halfW - runtime.camera.x;
-  const viewY = halfH - runtime.camera.y;
+  const canvasW = canvasEl.width;
+  const canvasH = canvasEl.height;
+
+  const refHalfW = BG_REFERENCE_WIDTH / 2;
+  const refHalfH = BG_REFERENCE_HEIGHT / 2;
+
+  const screenHalfW = canvasW / 2;
+  const screenHalfH = canvasH / 2;
+
+  const camX = runtime.camera.x;
+  const camY = runtime.camera.y;
+
   const nowMs = performance.now();
 
   if (frontFlag === 0 && runtime.map.blackBackground) {
     ctx.save();
     ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
+    ctx.fillRect(0, 0, canvasW, canvasH);
     ctx.restore();
   }
 
@@ -2498,18 +2508,18 @@ function drawBackgroundLayer(frontFlag) {
 
     let x;
     if (hMobile) {
-      x = background.x + (background.rx * nowMs) / 128 + viewX;
+      x = background.x + (background.rx * nowMs) / 128 + (screenHalfW - camX);
     } else {
-      const shiftX = (background.rx * (halfW - viewX)) / 100 + halfW;
-      x = background.x + shiftX;
+      const shiftX = (background.rx * (refHalfW - camX)) / 100 + refHalfW;
+      x = background.x + shiftX + (screenHalfW - refHalfW);
     }
 
     let y;
     if (vMobile) {
-      y = background.y + (background.ry * nowMs) / 128 + viewY;
+      y = background.y + (background.ry * nowMs) / 128 + (screenHalfH - camY);
     } else {
-      const shiftY = (background.ry * (halfH - viewY)) / 100 + halfH;
-      y = background.y + shiftY;
+      const shiftY = (background.ry * (refHalfH - camY)) / 100 + refHalfH;
+      y = background.y + shiftY + (screenHalfH - refHalfH);
     }
 
     const tileX = background.type === 1 || background.type === 3 || background.type === 4 || background.type === 6 || background.type === 7;
@@ -2529,10 +2539,10 @@ function drawBackgroundLayer(frontFlag) {
       if (xBegin <= 0) xBegin += cx;
       xBegin -= width;
 
-      xEnd -= canvasEl.width;
+      xEnd -= canvasW;
       xEnd %= cx;
       if (xEnd >= 0) xEnd -= cx;
-      xEnd += canvasEl.width;
+      xEnd += canvasW;
     }
 
     if (tileY) {
@@ -2541,10 +2551,10 @@ function drawBackgroundLayer(frontFlag) {
       if (yBegin <= 0) yBegin += cy;
       yBegin -= height;
 
-      yEnd -= canvasEl.height;
+      yEnd -= canvasH;
       yEnd %= cy;
       if (yEnd >= 0) yEnd -= cy;
-      yEnd += canvasEl.height;
+      yEnd += canvasH;
     }
 
     const drawStartX = tileX ? Math.floor(xBegin) - 2 : Math.round(baseX);
