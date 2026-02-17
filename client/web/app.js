@@ -46,8 +46,9 @@ const PHYS_FALL_BRAKE = 0.025;
 const PHYS_HSPEED_DEADZONE = 0.1;
 const PHYS_FALL_SPEED_CAP = 670;
 const PHYS_MAX_LAND_SPEED = 162.5;
-const PHYS_ROPE_JUMP_HMULT = 8.0;
+const PHYS_ROPE_JUMP_HMULT = 6.0;
 const PHYS_ROPE_JUMP_VDIV = 1.5;
+const PHYS_CLIMB_ACTION_DELAY_MS = 200;
 const PHYS_DEFAULT_SPEED_STAT = 115;
 const PHYS_DEFAULT_JUMP_STAT = 110;
 const HIDDEN_PORTAL_REVEAL_DELAY_MS = 500;
@@ -85,6 +86,7 @@ const runtime = {
     climbing: false,
     climbRope: null,
     climbCooldownUntil: 0,
+    climbAttachTime: 0,
     downJumpIgnoreFootholdId: null,
     downJumpIgnoreUntil: 0,
     downJumpControlLock: false,
@@ -317,6 +319,7 @@ function applyManualTeleport(x, y) {
   player.climbing = false;
   player.climbRope = null;
   player.climbCooldownUntil = 0;
+  player.climbAttachTime = 0;
   player.reattachLockUntil = 0;
   player.reattachLockRopeKey = null;
   player.downJumpIgnoreFootholdId = null;
@@ -492,12 +495,33 @@ const CHAT_LOG_HEIGHT_CACHE_KEY = "mapleweb.debug.chatLogHeight.v1";
 function initChatLogResize() {
   if (!chatLogEl || !chatLogHandleEl) return;
 
+  let chatLogCollapsed = false;
+  let chatLogExpandedHeight = 140;
+
   const cached = localStorage.getItem(CHAT_LOG_HEIGHT_CACHE_KEY);
   if (cached) {
     const h = Number(cached);
     if (Number.isFinite(h) && h >= 48) {
       chatLogEl.style.height = h + "px";
+      chatLogExpandedHeight = h;
     }
+  }
+
+  function collapseChatLog() {
+    chatLogExpandedHeight = chatLogEl.offsetHeight || chatLogExpandedHeight;
+    chatLogCollapsed = true;
+    chatLogEl.style.height = "0px";
+    chatLogEl.style.minHeight = "0px";
+    chatLogEl.style.overflow = "hidden";
+    chatLogEl.style.borderTop = "none";
+  }
+
+  function expandChatLog() {
+    chatLogCollapsed = false;
+    chatLogEl.style.height = chatLogExpandedHeight + "px";
+    chatLogEl.style.minHeight = "";
+    chatLogEl.style.overflow = "";
+    chatLogEl.style.borderTop = "";
   }
 
   let dragging = false;
@@ -508,8 +532,20 @@ function initChatLogResize() {
     e.preventDefault();
     dragging = true;
     startY = e.clientY;
-    startHeight = chatLogEl.offsetHeight;
+    startHeight = chatLogCollapsed ? 0 : chatLogEl.offsetHeight;
     chatLogHandleEl.setPointerCapture(e.pointerId);
+  });
+
+  chatLogHandleEl.addEventListener("dblclick", (e) => {
+    e.preventDefault();
+    if (chatLogCollapsed) {
+      expandChatLog();
+    } else {
+      collapseChatLog();
+    }
+    try {
+      localStorage.setItem(CHAT_LOG_HEIGHT_CACHE_KEY, String(chatLogExpandedHeight));
+    } catch { /* ignore */ }
   });
 
   window.addEventListener("pointermove", (e) => {
@@ -520,13 +556,20 @@ function initChatLogResize() {
     const delta = startY - e.clientY;
     const newH = Math.max(48, Math.min(maxH, startHeight + delta));
     chatLogEl.style.height = newH + "px";
+    chatLogEl.style.minHeight = "";
+    chatLogEl.style.overflow = "";
+    chatLogEl.style.borderTop = "";
+    chatLogCollapsed = false;
   });
 
   window.addEventListener("pointerup", (e) => {
     if (!dragging) return;
     dragging = false;
+    if (!chatLogCollapsed) {
+      chatLogExpandedHeight = chatLogEl.offsetHeight || chatLogExpandedHeight;
+    }
     try {
-      localStorage.setItem(CHAT_LOG_HEIGHT_CACHE_KEY, String(chatLogEl.offsetHeight));
+      localStorage.setItem(CHAT_LOG_HEIGHT_CACHE_KEY, String(chatLogExpandedHeight));
     } catch { /* ignore */ }
   });
 }
@@ -2134,6 +2177,7 @@ function updatePlayer(dt) {
     if (rope && !blockedByReattachLock) {
       player.climbing = true;
       player.climbRope = rope;
+      player.climbAttachTime = nowMs;
       player.x = climbSnapX(rope);
       player.vx = 0;
       player.vy = 0;
@@ -2143,7 +2187,8 @@ function updatePlayer(dt) {
   }
 
   if (player.climbing && player.climbRope) {
-    const sideJumpRequested = jumpRequested && move !== 0;
+    const climbActionReady = nowMs >= player.climbAttachTime + PHYS_CLIMB_ACTION_DELAY_MS;
+    const sideJumpRequested = jumpRequested && move !== 0 && climbActionReady;
 
     player.facing = -1;
 

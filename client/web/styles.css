@@ -320,10 +320,34 @@ button {
   color: rgba(255, 255, 255, 0.35);
 }
 
+/* ── Chat log resize handle (always visible between log and bar) ── */
+.chat-log-handle {
+  position: absolute;
+  bottom: 38px;
+  left: 0;
+  right: 0;
+  height: 10px;
+  z-index: 18;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.chat-log-handle::after {
+  content: "";
+  display: block;
+  width: 36px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
 /* ── Chat log (history overlay) ── */
 .chat-log {
   position: absolute;
-  bottom: 38px;
+  bottom: 48px;
   left: 0;
   right: 0;
   height: 140px;
@@ -336,25 +360,6 @@ button {
   pointer-events: auto;
   user-select: none;
   -webkit-user-select: none;
-}
-
-.chat-log-handle {
-  height: 6px;
-  cursor: ns-resize;
-  flex-shrink: 0;
-  background: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.chat-log-handle::after {
-  content: "";
-  display: block;
-  width: 36px;
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.22);
 }
 
 .chat-log-messages {
