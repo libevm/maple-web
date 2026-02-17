@@ -395,6 +395,7 @@ function openChatInput() {
 function closeChatInput() {
   runtime.chat.inputActive = false;
   chatBarEl?.classList.add("inactive");
+  if (chatInputEl) chatInputEl.value = "";
   resetGameplayInput();
   canvasEl.focus();
 }
