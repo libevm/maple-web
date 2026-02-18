@@ -1266,7 +1266,7 @@ async function loadLifeAnimation(type, id) {
 
       // Extract mob stats from info
       let speed = -100; // default: stationary
-      let level = 1, wdef = 0, avoid = 0, knockback = 1;
+      let level = 1, wdef = 0, avoid = 0, knockback = 1, maxHP = 0;
       if (type === "m" && infoNode) {
         const infoRec = imgdirLeafRecord(infoNode);
         speed = safeNumber(infoRec.speed, -100);
@@ -1274,6 +1274,7 @@ async function loadLifeAnimation(type, id) {
         wdef = safeNumber(infoRec.PDDamage, 0);
         avoid = safeNumber(infoRec.eva, 0);
         knockback = safeNumber(infoRec.pushed, 1);
+        maxHP = safeNumber(infoRec.maxHP, 100);
       }
 
       // Extract NPC script ID from info/script
@@ -1294,7 +1295,7 @@ async function loadLifeAnimation(type, id) {
         }
       }
 
-      const result = { stances, name, speed, func, dialogue, scriptId, level, wdef, avoid, knockback };
+      const result = { stances, name, speed, func, dialogue, scriptId, level, wdef, avoid, knockback, maxHP };
       lifeAnimations.set(cacheKey, result);
       return result;
     } catch (_) {
@@ -1862,6 +1863,7 @@ function initLifeRuntimeStates() {
       facing: life.f === 1 ? 1 : -1,
       canMove,
       mobSpeed, // C++ force magnitude per tick
+      renderLayer: startOnGround ? (map.footholdById?.get(startFhId)?.layer ?? 7) : 7,
       patrolMin: hasPatrolRange ? life.rx0 : -Infinity,
       patrolMax: hasPatrolRange ? life.rx1 : Infinity,
       behaviorState: "stand",
@@ -2008,6 +2010,12 @@ function updateLifeAnimations(dtMs) {
       }
     }
 
+    // --- Update render layer from current foothold ---
+    if (state.phobj && state.phobj.fhId) {
+      const curFh = map.footholdById?.get(String(state.phobj.fhId));
+      if (curFh && curFh.layer != null) state.renderLayer = curFh.layer;
+    }
+
     // --- Frame animation ---
     const stance = anim.stances[state.stance] ?? anim.stances["stand"];
     if (!stance || stance.frames.length === 0) continue;
@@ -2021,7 +2029,7 @@ function updateLifeAnimations(dtMs) {
   }
 }
 
-function drawLifeSprites() {
+function drawLifeSprites(filterLayer) {
   if (!runtime.map) return;
 
   const cam = runtime.camera;
@@ -2030,6 +2038,9 @@ function drawLifeSprites() {
   const now = performance.now();
 
   for (const [idx, state] of lifeRuntimeState) {
+    // Layer filter: only draw life on this layer (or all if no filter)
+    if (filterLayer != null && state.renderLayer !== filterLayer) continue;
+
     const life = runtime.map.lifeEntries[idx];
     const cacheKey = `${life.type}:${life.id}`;
     const anim = lifeAnimations.get(cacheKey);
@@ -4403,6 +4414,16 @@ function buildMapAssetPreloadTasks(map) {
           if (cachedMeta) delete cachedMeta.basedata;
         }
       }
+      // Update mob HP from WZ data now that it's loaded
+      if (life.type === "m" && anim.maxHP > 0) {
+        for (const [idx, state] of lifeRuntimeState) {
+          const l = map.lifeEntries[idx];
+          if (l && l.type === "m" && l.id === life.id && state.maxHp === MOB_DEFAULT_HP) {
+            state.maxHp = anim.maxHP;
+            state.hp = anim.maxHP;
+          }
+        }
+      }
       return anim;
     });
   }
@@ -5529,6 +5550,7 @@ function drawMapLayersWithCharacter() {
 
   for (const layer of runtime.map.layers) {
     drawMapLayer(layer);
+    drawLifeSprites(layer.layerIndex);
 
     if (!playerDrawn && layer.layerIndex === playerLayer) {
       drawCharacter();
@@ -6304,7 +6326,6 @@ function render() {
   drawBackgroundLayer(0);
   drawMapLayersWithCharacter();
   drawReactors();
-  drawLifeSprites();
   drawDamageNumbers();
   if (runtime.debug.overlayEnabled && runtime.debug.showRopes) {
     drawRopeGuides();
