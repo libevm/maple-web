@@ -20,6 +20,9 @@ const debugMouseFlyToggleEl = document.getElementById("debug-mousefly-toggle");
 const statSpeedInputEl = document.getElementById("stat-speed-input");
 const statJumpInputEl = document.getElementById("stat-jump-input");
 
+const runtimeLogsEl = document.getElementById("runtime-logs");
+const clearRuntimeLogsEl = document.getElementById("clear-runtime-logs-button");
+
 const debugToggleEl = document.getElementById("debug-toggle");
 const debugPanelEl = document.getElementById("debug-panel");
 const debugCloseEl = document.getElementById("debug-close");
@@ -32,6 +35,27 @@ const settingsFixed169El = document.getElementById("settings-fixed-169");
 const settingsMinimapToggleEl = document.getElementById("settings-minimap-toggle");
 const canvasEl = document.getElementById("map-canvas");
 const ctx = canvasEl.getContext("2d");
+
+// ---- Runtime log system ----
+const RLOG_MAX = 200;
+const runtimeLogs = [];
+function rlog(msg) {
+  const ts = new Date().toLocaleTimeString("en-GB", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3 });
+  const line = `[${ts}] ${msg}`;
+  runtimeLogs.push(line);
+  if (runtimeLogs.length > RLOG_MAX) runtimeLogs.shift();
+  if (runtimeLogsEl) {
+    runtimeLogsEl.textContent = runtimeLogs.join("\n");
+    runtimeLogsEl.scrollTop = runtimeLogsEl.scrollHeight;
+  }
+  console.log(`[rlog] ${msg}`);
+}
+if (clearRuntimeLogsEl) {
+  clearRuntimeLogsEl.addEventListener("click", () => {
+    runtimeLogs.length = 0;
+    if (runtimeLogsEl) runtimeLogsEl.textContent = "";
+  });
+}
 
 const jsonCache = new Map();
 const metaCache = new Map();
@@ -920,7 +944,9 @@ async function fetchJson(path) {
       (async () => {
         const response = await fetch(path);
         if (!response.ok) {
-          throw new Error(`Failed to load JSON ${path} (${response.status})`);
+          const msg = `Failed to load JSON ${path} (${response.status})`;
+          rlog(`fetchJson FAIL: ${msg}`);
+          throw new Error(msg);
         }
         return response.json();
       })(),
@@ -2251,17 +2277,24 @@ async function fadeScreenTo(targetAlpha, durationMs) {
 }
 
 async function runPortalMapTransition(targetMapId, targetPortalName) {
+  rlog(`portalTransition START → map=${targetMapId} portal=${targetPortalName}`);
   await fadeScreenTo(1, PORTAL_FADE_OUT_MS);
+  rlog(`portalTransition fadeOut done, clearing overlay for loading screen`);
   // Clear transition overlay so loading screen is visible
   runtime.transition.alpha = 0;
   runtime.transition.active = false;
   try {
     await loadMap(targetMapId, targetPortalName || null, true);
+    rlog(`portalTransition loadMap resolved`);
+  } catch (err) {
+    rlog(`portalTransition loadMap THREW: ${err?.message ?? err}`);
   } finally {
     // Fade in from black after map loads
     runtime.transition.alpha = 1;
     runtime.transition.active = true;
+    rlog(`portalTransition fadeIn start`);
     await fadeScreenTo(0, PORTAL_FADE_IN_MS);
+    rlog(`portalTransition COMPLETE`);
   }
 }
 
@@ -2305,7 +2338,10 @@ async function tryUsePortal(force = false) {
       return;
     }
 
+    rlog(`tryUsePortal → runPortalMapTransition targetMap=${portal.targetMapId} targetPortal=${targetPortalName}`);
     await runPortalMapTransition(String(portal.targetMapId), targetPortalName || null);
+  } catch (err) {
+    rlog(`tryUsePortal ERROR: ${err?.message ?? err}`);
   } finally {
     runtime.portalWarpInProgress = false;
   }
@@ -2765,7 +2801,7 @@ async function preloadMapAssets(map, loadToken) {
             await requestImageByKey(key);
           }
         } catch (error) {
-          console.warn("[preload] failed", key, error);
+          rlog(`preload FAIL key=${key} err=${error?.message ?? error}`);
         } finally {
           if (loadToken === runtime.mapLoadToken) {
             runtime.loading.loaded += 1;
@@ -4335,10 +4371,17 @@ function drawTransitionOverlay() {
   ctx.restore();
 }
 
+let _lastRenderState = "";
 function render() {
   ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
+
+  const rs = `loading=${runtime.loading.active},map=${!!runtime.map},warp=${runtime.portalWarpInProgress},trans=${runtime.transition.alpha.toFixed(1)}`;
+  if (rs !== _lastRenderState) {
+    rlog(`render state: ${rs}`);
+    _lastRenderState = rs;
+  }
 
   if (runtime.loading.active) {
     drawLoadingScreen();
@@ -4656,10 +4699,12 @@ async function playSfx(soundFile, soundName) {
 }
 
 async function loadMap(mapId, spawnPortalName = null, spawnFromPortalTransfer = false) {
+  rlog(`loadMap START mapId=${mapId} portal=${spawnPortalName} transfer=${spawnFromPortalTransfer}`);
   const loadToken = runtime.mapLoadToken + 1;
   runtime.mapLoadToken = loadToken;
 
   runtime.loading.active = true;
+  rlog(`loading.active = true`);
   runtime.loading.total = 0;
   runtime.loading.loaded = 0;
   runtime.loading.progress = 0;
@@ -4676,9 +4721,11 @@ async function loadMap(mapId, spawnPortalName = null, spawnFromPortalTransfer = 
     setStatus(`Loading map ${mapId}...`);
 
     const path = mapPathFromId(mapId);
+    rlog(`loadMap fetchJson ${path}`);
     const raw = await fetchJson(path);
-    if (loadToken !== runtime.mapLoadToken) return;
+    if (loadToken !== runtime.mapLoadToken) { rlog(`loadMap ABORTED (token mismatch after fetchJson)`); return; }
 
+    rlog(`loadMap parseMapData...`);
     runtime.mapId = String(mapId).trim();
     runtime.map = parseMapData(raw);
 
@@ -4734,14 +4781,18 @@ async function loadMap(mapId, spawnPortalName = null, spawnFromPortalTransfer = 
     runtime.portalScroll.elapsedMs = 0;
     runtime.hiddenPortalState.clear();
 
+    rlog(`loadMap preloadMapAssets START`);
     await preloadMapAssets(runtime.map, loadToken);
-    if (loadToken !== runtime.mapLoadToken) return;
+    if (loadToken !== runtime.mapLoadToken) { rlog(`loadMap ABORTED (token mismatch after preload)`); return; }
+    rlog(`loadMap preloadMapAssets DONE (${runtime.loading.loaded}/${runtime.loading.total})`);
 
     runtime.loading.progress = 1;
     runtime.loading.label = "Assets loaded";
     runtime.loading.active = false;
+    rlog(`loading.active = false (success)`);
 
     // Initialize animation states
+    rlog(`loadMap initLifeRuntimeStates...`);
     initLifeRuntimeStates();
     objectAnimStates.clear();
     bgAnimStates.clear();
@@ -4761,9 +4812,13 @@ async function loadMap(mapId, spawnPortalName = null, spawnFromPortalTransfer = 
     if (runtime.map?.swim) {
       addSystemChatMessage(`[Info] This is a water environment. Use arrow keys or Space to swim when airborne.`);
     }
+    rlog(`loadMap COMPLETE mapId=${runtime.mapId}`);
   } catch (error) {
+    rlog(`loadMap ERROR: ${error instanceof Error ? error.message : String(error)}`);
+    rlog(`loadMap ERROR stack: ${error instanceof Error ? error.stack : "N/A"}`);
     if (loadToken === runtime.mapLoadToken) {
       runtime.loading.active = false;
+      rlog(`loading.active = false (error path)`);
       runtime.loading.label = "";
       runtime.loading.progress = 0;
       runtime.loading.total = 0;
