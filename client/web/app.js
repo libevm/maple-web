@@ -1266,60 +1266,31 @@ function fhWall(map, fhId, goingLeft, fy) {
 }
 
 /**
- * Full physics step for a mob PhysicsObject, matching C++ move_object.
- * phobj: { x, y, hspeed, vspeed, hforce, vforce, fhId, onGround, fhSlope, turnAtEdges }
+ * Full physics step for a mob/NPC PhysicsObject.
  */
 function mobPhysicsStep(map, phobj, isSwimMap) {
-  // 1. update_fh — track current foothold
-  const curFh = map.footholdById?.get(String(phobj.fhId)) ?? null;
-
-  if (phobj.onGround && curFh) {
-    if (phobj.x > fhRight(curFh) && curFh.nextId) {
-      phobj.fhId = curFh.nextId;
-    } else if (phobj.x < fhLeft(curFh) && curFh.prevId) {
-      phobj.fhId = curFh.prevId;
-    }
-    const newFh = map.footholdById?.get(String(phobj.fhId));
-    if (!newFh || fhIsWall(newFh)) {
-      const below = fhIdBelow(map, phobj.x, phobj.y);
-      phobj.fhId = below ? below.id : (curFh ? curFh.id : "0");
-    }
-  } else {
-    const below = fhIdBelow(map, phobj.x, phobj.y);
-    if (below) phobj.fhId = below.id;
-  }
-
-  const fh = map.footholdById?.get(String(phobj.fhId)) ?? null;
-  phobj.fhSlope = fhSlope(fh);
-
-  const ground = fh ? fhGroundAt(fh, phobj.x) : null;
-  if (ground !== null && phobj.vspeed >= 0 && phobj.y >= ground - 1) {
-    phobj.y = ground;
-    phobj.onGround = true;
-    phobj.vspeed = 0;
-  } else if (ground !== null && phobj.onGround) {
-    phobj.y = ground;
-  }
-
-  // 2. Apply forces (move_normal / move_swimming)
+  // --- 1. Forces ---
   let hacc = 0, vacc = 0;
 
-  if (isSwimMap) {
-    hacc = phobj.hforce - MOB_SWIMFRICTION * phobj.hspeed;
-    vacc = phobj.vforce - MOB_SWIMFRICTION * phobj.vspeed + MOB_SWIMGRAVFORCE;
-  } else if (phobj.onGround) {
+  if (phobj.onGround) {
     hacc = phobj.hforce;
     vacc = phobj.vforce;
+    const slope = phobj.fhSlope;
     if (hacc === 0 && Math.abs(phobj.hspeed) < 0.1) {
       phobj.hspeed = 0;
     } else {
       const inertia = phobj.hspeed / MOB_GROUNDSLIP;
-      let sf = phobj.fhSlope;
-      sf = Math.max(-0.5, Math.min(0.5, sf));
+      const sf = Math.max(-0.5, Math.min(0.5, slope));
       hacc -= (MOB_FRICTION + MOB_SLOPEFACTOR * (1 + sf * -inertia)) * inertia;
     }
   } else {
-    vacc = MOB_GRAVFORCE;
+    // Airborne — gravity
+    if (isSwimMap) {
+      hacc = phobj.hforce - MOB_SWIMFRICTION * phobj.hspeed;
+      vacc = phobj.vforce - MOB_SWIMFRICTION * phobj.vspeed + MOB_SWIMGRAVFORCE;
+    } else {
+      vacc = MOB_GRAVFORCE;
+    }
   }
 
   phobj.hforce = 0;
@@ -1327,44 +1298,90 @@ function mobPhysicsStep(map, phobj, isSwimMap) {
   phobj.hspeed += hacc;
   phobj.vspeed += vacc;
 
-  // 3. limit_movement — walls and edges
-  if (Math.abs(phobj.hspeed) > 0.001) {
-    const left = phobj.hspeed < 0;
-    const nextX = phobj.x + phobj.hspeed;
-    let wall = fhWall(map, phobj.fhId, left, phobj.y + phobj.vspeed);
-    let collision = left ? (phobj.x >= wall && nextX <= wall) : (phobj.x <= wall && nextX >= wall);
+  // --- 2. Horizontal movement + limits ---
+  const prevX = phobj.x;
+  const nextX = phobj.x + phobj.hspeed;
 
-    if (!collision && phobj.turnAtEdges) {
+  if (phobj.onGround && Math.abs(phobj.hspeed) > 0.001) {
+    const left = phobj.hspeed < 0;
+
+    // Wall check
+    let wall = fhWall(map, phobj.fhId, left, phobj.y);
+    let blocked = left ? (prevX >= wall && nextX <= wall) : (prevX <= wall && nextX >= wall);
+
+    // Edge check (TURNATEDGES)
+    if (!blocked && phobj.turnAtEdges) {
       wall = fhEdge(map, phobj.fhId, left);
-      collision = left ? (phobj.x >= wall && nextX <= wall) : (phobj.x <= wall && nextX >= wall);
+      blocked = left ? (prevX >= wall && nextX <= wall) : (prevX <= wall && nextX >= wall);
     }
 
-    if (collision) {
+    if (blocked) {
       phobj.x = wall;
       phobj.hspeed = 0;
-      phobj.turnAtEdges = false; // cleared on collision, re-set by AI
-      return; // don't move further this tick
+      phobj.turnAtEdges = false;
+    } else {
+      phobj.x = nextX;
     }
+  } else {
+    phobj.x += phobj.hspeed;
   }
 
-  if (Math.abs(phobj.vspeed) > 0.001 && fh) {
-    const nextY = phobj.y + phobj.vspeed;
-    const gCur = fhGroundAt(fh, phobj.x) ?? phobj.y;
-    const gNext = fhGroundAt(fh, phobj.x + phobj.hspeed) ?? gCur;
-    if (phobj.y <= gCur && nextY >= gNext) {
-      phobj.y = gNext;
-      phobj.vspeed = 0;
-      phobj.onGround = true;
-    }
-  }
-
-  // 4. Move
-  phobj.x += phobj.hspeed;
+  // --- 3. Vertical movement + landing ---
+  const prevY = phobj.y;
   phobj.y += phobj.vspeed;
 
+  if (!phobj.onGround && phobj.vspeed >= 0) {
+    // Falling — find foothold below that we crossed through
+    const landFh = fhIdBelow(map, phobj.x, prevY);
+    if (landFh) {
+      const gy = fhGroundAt(landFh, phobj.x);
+      if (gy !== null && prevY <= gy + 1 && phobj.y >= gy - 1) {
+        phobj.y = gy;
+        phobj.vspeed = 0;
+        phobj.onGround = true;
+        phobj.fhId = landFh.id;
+        phobj.fhSlope = fhSlope(landFh);
+        return;
+      }
+    }
+  }
+
+  // --- 4. Update foothold tracking when on ground ---
+  if (phobj.onGround) {
+    const curFh = map.footholdById?.get(String(phobj.fhId));
+    if (curFh) {
+      // Follow prev/next chain
+      if (phobj.x > fhRight(curFh) && curFh.nextId) {
+        const nxt = map.footholdById?.get(curFh.nextId);
+        if (nxt && !fhIsWall(nxt)) {
+          phobj.fhId = nxt.id;
+          phobj.fhSlope = fhSlope(nxt);
+        }
+      } else if (phobj.x < fhLeft(curFh) && curFh.prevId) {
+        const prv = map.footholdById?.get(curFh.prevId);
+        if (prv && !fhIsWall(prv)) {
+          phobj.fhId = prv.id;
+          phobj.fhSlope = fhSlope(prv);
+        }
+      }
+    }
+
+    // Snap Y to current foothold
+    const fh = map.footholdById?.get(String(phobj.fhId));
+    if (fh) {
+      const gy = fhGroundAt(fh, phobj.x);
+      if (gy !== null) {
+        phobj.y = gy;
+      } else {
+        // Walked off foothold — become airborne
+        phobj.onGround = false;
+      }
+    }
+  }
+
   // Clamp to map borders
-  if (phobj.y > map.bounds.maxY + 100) {
-    phobj.y = map.bounds.maxY + 100;
+  if (phobj.y > map.bounds.maxY + 200) {
+    phobj.y = map.bounds.maxY + 200;
     phobj.vspeed = 0;
   }
 }
@@ -1384,19 +1401,11 @@ function initLifeRuntimeStates() {
     const animData = lifeAnimations.get(cacheKey);
     const hasMove = !!animData?.stances?.["move"];
 
-    // Find starting foothold
-    let startFh = null;
-    if (life.fh) startFh = map.footholdById?.get(String(life.fh)) ?? null;
-    if (!startFh) {
-      const found = findFootholdAtXNearY(map, life.x, life.cy, 80);
-      startFh = found?.line ?? null;
-    }
-
-    // Snap Y to foothold ground
-    let startY = life.cy;
-    if (startFh) {
-      const gy = fhGroundAt(startFh, life.x);
-      if (gy !== null) startY = gy;
+    // Find starting foothold (for tracking only — don't snap position)
+    let startFhId = "0";
+    if (life.fh) {
+      const fh = map.footholdById?.get(String(life.fh));
+      if (fh) startFhId = fh.id;
     }
 
     // Mob speed from WZ: C++ does (speed+100)*0.001 as force-per-tick
@@ -1412,17 +1421,17 @@ function initLifeRuntimeStates() {
       stance: "stand",
       frameIndex: 0,
       frameTimerMs: 0,
-      // Physics object (mirrors C++ PhysicsObject)
+      // Physics object (mirrors C++ PhysicsObject) — spawns airborne, gravity lands it
       phobj: {
         x: life.x,
-        y: startY,
+        y: life.cy,
         hspeed: 0,
         vspeed: 0,
         hforce: 0,
         vforce: 0,
-        fhId: startFh ? startFh.id : "0",
+        fhId: startFhId,
         fhSlope: 0,
-        onGround: !!startFh,
+        onGround: false,
         turnAtEdges: true,
       },
       facing: life.f === 1 ? 1 : -1,
