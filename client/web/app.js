@@ -2322,11 +2322,10 @@ function performAttack() {
   const player = runtime.player;
   const now = performance.now();
 
-  // C++ can_attack: not already attacking, not climbing, not sitting
+  // C++ can_attack: not already attacking, not climbing
   if (player.attacking) return;
   if (player.climbing) return;
   if (now < player.attackCooldownUntil) return;
-  if (!player.onGround) return;
 
   // C++ CharLook::getattackstance: if prone → PRONESTAB, else random weapon stance
   const isProne = player.action === "prone" || player.action === "sit";
@@ -2447,8 +2446,8 @@ function updatePlayerAttack(dt) {
   const player = runtime.player;
   if (!player.attacking) return;
 
-  // Cancel attack if player goes airborne or starts climbing
-  if (!player.onGround || player.climbing) {
+  // Cancel attack if player starts climbing
+  if (player.climbing) {
     player.attacking = false;
     player.attackFrameIndex = 0;
     player.attackFrameTimer = 0;
