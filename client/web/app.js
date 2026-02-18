@@ -3456,6 +3456,7 @@ function drawMapLayer(layer) {
 function currentPlayerRenderLayer() {
   if (!runtime.map) return safeNumber(runtime.player.footholdLayer, -1);
   if (runtime.player.climbing) return 7;
+  if (!runtime.player.onGround) return 7;
   return safeNumber(runtime.player.footholdLayer, -1);
 }
 
