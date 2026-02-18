@@ -1781,7 +1781,50 @@ function updateLifeAnimations(dtMs) {
     if (!anim) continue;
 
     // --- Mob AI + physics ---
-    if (state.canMove && !state.dying && !state.dead && state.stance !== "hit1") {
+    const inHitStance = state.stance === "hit1" && !state.dying;
+
+    if (inHitStance && state.canMove && state.phobj) {
+      // ── C++ Mob::update HIT stance: apply knockback force per tick ──
+      // case Stance::HIT:
+      //   double KBFORCE = phobj.onground ? 0.2 : 0.1;
+      //   phobj.hforce = flip ? -KBFORCE : KBFORCE;
+      // counter++ each tick, exits HIT when counter > 200
+      const ph = state.phobj;
+      const steps = Math.max(1, Math.round(dtMs / MOB_PHYS_TIMESTEP));
+
+      state.hitCounter += steps;
+
+      if (state.hitCounter > MOB_KB_COUNTER_EXIT) {
+        // C++ next_move() — exit HIT, return to patrol
+        state.stance = "stand";
+        state.frameIndex = 0;
+        state.frameTimerMs = 0;
+        state.hitCounter = 0;
+        state.behaviorState = "stand";
+        state.behaviorTimerMs = randomRange(500, 1500);
+        ph.hspeed = 0;
+        ph.turnAtEdges = true;
+      } else {
+        // Apply KB force each tick — direction is opposite to facing (mob faces attacker)
+        // C++ flip convention: flip=true → mob faces right → hforce = -KBFORCE (push left)
+        // Our facing: -1=left,1=right. KB pushes opposite to facing.
+        const kbForce = ph.onGround ? MOB_KB_FORCE_GROUND : MOB_KB_FORCE_AIR;
+        ph.hforce = -state.facing * kbForce;
+        ph.turnAtEdges = true; // keep edge checking active during KB
+
+        // Run through normal mobPhysicsStep — handles wall/edge limits, foothold tracking
+        for (let s = 0; s < steps; s++) {
+          mobPhysicsStep(map, ph, isSwimMap);
+        }
+
+        // If hit a wall/edge, stop knockback sliding
+        if (!ph.turnAtEdges) {
+          ph.hspeed = 0;
+          ph.turnAtEdges = true;
+        }
+      }
+    } else if (state.canMove && !state.dying && !state.dead && !inHitStance) {
+      // ── Normal patrol AI ──
       state.behaviorTimerMs -= dtMs;
       state.behaviorCounter += dtMs;
 
@@ -2036,7 +2079,7 @@ function drawDamageNumbers() {
 function calculatePlayerDamageRange() {
   const p = runtime.player;
   // Beginner stats: STR≈4+level, DEX≈4
-  const str = 4 + p.level;
+  const str = 25 + p.level;
   const dex = 4;
   const primary = WEAPON_MULTIPLIER * str;
   const secondary = dex;
@@ -2136,10 +2179,20 @@ function performAttack() {
   if (now < player.attackCooldownUntil) return;
   if (!player.onGround) return;
 
+  // C++ CharLook::getattackstance: if prone → PRONESTAB, else random weapon stance
+  const isProne = player.action === "prone" || player.action === "sit";
+  let attackStance;
+  if (isProne && getCharacterActionFrames("proneStab").length > 0) {
+    attackStance = "proneStab";
+  } else {
+    const stanceIdx = Math.floor(Math.random() * SWORD_1H_ATTACK_STANCES.length);
+    attackStance = SWORD_1H_ATTACK_STANCES[stanceIdx];
+  }
+
   // Start attack animation
   player.attacking = true;
-  const stanceIdx = Math.floor(Math.random() * SWORD_1H_ATTACK_STANCES.length);
-  player.attackStance = SWORD_1H_ATTACK_STANCES[stanceIdx];
+  player.attackDegenerate = isProne; // C++ degenerate = true when prone
+  player.attackStance = attackStance;
   player.attackFrameIndex = 0;
   player.attackFrameTimer = 0;
   player.attackCooldownUntil = now + ATTACK_COOLDOWN_MS;
@@ -2169,7 +2222,14 @@ function applyAttackToMob(target) {
   const mobKnockback = anim?.knockback ?? 1;
 
   // Calculate damage using C++ formula
-  const { mindamage, maxdamage } = calculatePlayerDamageRange();
+  let { mindamage, maxdamage } = calculatePlayerDamageRange();
+
+  // C++ degenerate (prone) attack: damage /= 10
+  if (runtime.player.attackDegenerate) {
+    mindamage /= 10;
+    maxdamage /= 10;
+  }
+
   const result = calculateMobDamage(mindamage, maxdamage, mobLevel, mobWdef, mobAvoid);
 
   // Spawn damage number (even for miss)
@@ -2185,7 +2245,7 @@ function applyAttackToMob(target) {
   }
 
   // Play hit sound
-  void playSfx("Mob.img", `${life.id.replace(/^0+/, "").padStart(7, "0")}/Damage`);
+  void playMobSfx(life.id, "Damage");
 
   // C++ Mob::apply_damage: knockback when damage >= mob.knockback threshold
   // Sets flip toward attacker, counter=170, stance=HIT.
@@ -2214,7 +2274,7 @@ function applyAttackToMob(target) {
       state.frameIndex = 0;
       state.frameTimerMs = 0;
     }
-    void playSfx("Mob.img", `${life.id.replace(/^0+/, "").padStart(7, "0")}/Die`);
+    void playMobSfx(life.id, "Die");
     // Award EXP
     runtime.player.exp += 3 + Math.floor(Math.random() * 5);
     if (runtime.player.exp >= runtime.player.maxExp) {
@@ -4228,7 +4288,7 @@ function buildMapAssetPreloadTasks(map) {
 
 function addCharacterPreloadTasks(taskMap) {
   const actions = ["stand1", "walk1", "jump", "ladder", "rope", "prone", "sit",
-    ...SWORD_1H_ATTACK_STANCES];
+    "proneStab", ...SWORD_1H_ATTACK_STANCES];
 
   for (const action of actions) {
     const actionFrames = getCharacterActionFrames(action);
@@ -6243,16 +6303,59 @@ function tick(timestampMs) {
   requestAnimationFrame(tick);
 }
 
-function findSoundNodeByName(node, soundName) {
-  if (!node) return null;
+function findSoundNodeByName(root, soundName) {
+  if (!root) return null;
 
-  if (node.$sound === soundName && node.basedata) {
-    return node;
-  }
+  // Support path-style names like "0120100/Damage" — walk $imgdir segments
+  const parts = soundName.split("/");
+  let current = root;
 
-  for (const child of node.$$ ?? []) {
-    const result = findSoundNodeByName(child, soundName);
-    if (result) return result;
+  for (let i = 0; i < parts.length; i++) {
+    const segment = parts[i];
+    const isLast = i === parts.length - 1;
+    let found = null;
+
+    for (const child of current.$$ ?? []) {
+      if (child.$imgdir === segment) {
+        found = child;
+        break;
+      }
+      if (isLast && child.$sound === segment && child.basedata) {
+        return child;
+      }
+    }
+
+    if (!found) {
+      // Fallback: recursive search for flat $sound match (BGM etc.)
+      if (i === 0) {
+        for (const child of current.$$ ?? []) {
+          if (child.$sound === soundName && child.basedata) return child;
+          const result = findSoundNodeByName(child, soundName);
+          if (result) return result;
+        }
+      }
+      return null;
+    }
+
+    // Resolve UOL references (e.g. "../0100100/Damage")
+    if (found.$uol && found.value) {
+      const uolPath = found.value;
+      // Resolve "../" relative paths by navigating from root
+      // UOL like "../0100100/Damage" means: go up one level, then into 0100100/Damage
+      // Since we track path segments, resolve against root with cleaned path
+      const currentPath = parts.slice(0, i);
+      const uolParts = uolPath.split("/");
+      const resolved = [...currentPath];
+      for (const p of uolParts) {
+        if (p === "..") resolved.pop();
+        else if (p !== ".") resolved.push(p);
+      }
+      // Recurse with the resolved absolute path
+      return findSoundNodeByName(root, resolved.join("/"));
+    }
+
+    if (isLast && found.basedata) return found;
+    current = found;
   }
 
   return null;
@@ -6404,6 +6507,43 @@ async function playSfx(soundFile, soundName) {
     }
   } catch (error) {
     console.warn("[audio] sfx failed", soundFile, soundName, error);
+  }
+}
+
+// Default mob sounds (Snail — 0100100, the most common base mob)
+const DEFAULT_MOB_HIT_SOUND = "0100100/Damage";
+const DEFAULT_MOB_DIE_SOUND = "0100100/Die";
+
+/**
+ * Play a mob sound effect with fallback to default (Snail) if not found.
+ * C++ loads hitsound/diesound from Sound["Mob.img"][strid]; if the node is
+ * empty the Sound stays id=0 and play() is a no-op. We improve on this by
+ * falling back to the most common mob sound.
+ */
+async function playMobSfx(mobId, soundType) {
+  const paddedId = mobId.replace(/^0+/, "").padStart(7, "0");
+  const soundName = `${paddedId}/${soundType}`;
+  const fallbackName = soundType === "Die" ? DEFAULT_MOB_DIE_SOUND : DEFAULT_MOB_HIT_SOUND;
+
+  runtime.audioDebug.lastSfx = `Mob.img/${soundName}`;
+  runtime.audioDebug.lastSfxAtMs = performance.now();
+  runtime.audioDebug.sfxPlayCount += 1;
+
+  if (!runtime.settings.sfxEnabled) return;
+
+  try {
+    const dataUri = await requestSoundDataUri("Mob.img", soundName);
+    const audio = getSfxFromPool(dataUri);
+    if (audio) { audio.volume = 0.45; audio.play().catch(() => {}); }
+  } catch (_) {
+    // Mob-specific sound not found — try default
+    try {
+      const dataUri = await requestSoundDataUri("Mob.img", fallbackName);
+      const audio = getSfxFromPool(dataUri);
+      if (audio) { audio.volume = 0.45; audio.play().catch(() => {}); }
+    } catch (e2) {
+      console.warn("[audio] mob sfx fallback failed", soundName, e2);
+    }
   }
 }
 
