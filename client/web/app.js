@@ -1905,13 +1905,9 @@ function updateLifeAnimations(dtMs) {
       }
 
       // ── C++ apply force based on current stance (lines 201-236) ──
-      // C++ switches on stance (not behaviorState) — HIT checked before MOVE
+      // HIT: no movement force — mob is staggered (initial impulse from applyAttackToMob only)
       if (state.stance === "hit1") {
-        // C++ case Stance::HIT: KBFORCE = onground ? 0.2 : 0.1; hforce = flip ? -KBFORCE : KBFORCE
-        if (state.canMove) {
-          const kbForce = ph.onGround ? MOB_KB_FORCE_GROUND : MOB_KB_FORCE_AIR;
-          ph.hforce = state.facing === 1 ? -kbForce : kbForce;
-        }
+        // No force during stagger — friction decelerates the initial impulse naturally
       } else if (state.behaviorState === "move") {
         // C++ case Stance::MOVE: phobj.hforce = flip ? speed : -speed;
         ph.hforce = state.facing === 1 ? state.mobSpeed : -state.mobSpeed;
