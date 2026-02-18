@@ -1318,6 +1318,7 @@ function parseMapData(raw) {
       .map((entry) => {
         const row = imgdirLeafRecord(entry);
         const frameNo = String(row.f ?? "0");
+        const baseKey = `obj:${row.oS}:${row.l0}:${row.l1}:${row.l2}`;
         return {
           id: safeNumber(entry.$imgdir, 0),
           x: safeNumber(row.x, 0),
@@ -1328,7 +1329,11 @@ function parseMapData(raw) {
           l2: String(row.l2 ?? ""),
           frameNo,
           z: safeNumber(row.z, 0),
-          key: `obj:${row.oS}:${row.l0}:${row.l1}:${row.l2}:${frameNo}`,
+          baseKey,
+          key: `${baseKey}:${frameNo}`,
+          // Animation fields — populated during preload
+          frameCount: 1,
+          frameDelays: null, // null = not animated, [ms, ms, ...] = animated
         };
       })
       .sort((a, b) => (a.z === b.z ? a.id - b.id : a.z - b.z));
@@ -1539,6 +1544,60 @@ async function loadObjectMeta(obj) {
   const target = findNodeByPath(json, [obj.l0, obj.l1, obj.l2]);
   const canvasNode = pickCanvasNode(target, obj.frameNo);
   return canvasMetaFromNode(canvasNode);
+}
+
+/**
+ * Load all frames for an animated object and register them in metaCache.
+ * Returns { frameCount, delays: number[] } or null if single-frame.
+ */
+async function loadAnimatedObjectFrames(obj) {
+  const path = `/resources/Map.wz/Obj/${obj.oS}.img.json`;
+  const json = await fetchJson(path);
+  const target = findNodeByPath(json, [obj.l0, obj.l1, obj.l2]);
+  if (!target) return null;
+
+  // Count numeric-keyed children that are canvas nodes
+  const frameNodes = (target.$$ ?? []).filter(
+    (c) => c.$imgdir !== undefined && /^\d+$/.test(c.$imgdir)
+  );
+  if (frameNodes.length <= 1) return null;
+
+  const delays = [];
+  for (const frameNode of frameNodes) {
+    const frameIdx = frameNode.$imgdir;
+    const canvasNode = pickCanvasNode(target, frameIdx);
+    if (!canvasNode) continue;
+
+    const meta = canvasMetaFromNode(canvasNode);
+    if (!meta) continue;
+
+    const key = `${obj.baseKey}:${frameIdx}`;
+    if (!metaCache.has(key)) {
+      metaCache.set(key, meta);
+    }
+
+    // Get delay from the frame node's children
+    let delay = 100;
+    for (const sub of frameNode.$$ ?? []) {
+      if (sub.$int === "delay") {
+        delay = safeNumber(sub.value, 100);
+      }
+    }
+    // Also check canvas node children for delay
+    if (canvasNode !== frameNode) {
+      for (const sub of canvasNode.$$ ?? []) {
+        if (sub.$int === "delay") {
+          delay = safeNumber(sub.value, delay);
+        }
+      }
+    }
+    delays.push(Math.max(delay, 30));
+
+    // Preload the image
+    await requestImageByKey(key);
+  }
+
+  return delays.length > 1 ? { frameCount: delays.length, delays } : null;
 }
 
 function requestObjectMeta(obj) {
@@ -2144,6 +2203,27 @@ function buildMapAssetPreloadTasks(map) {
     for (const obj of layer.objects ?? []) {
       if (!obj.key) continue;
       addPreloadTask(taskMap, obj.key, () => loadObjectMeta(obj));
+      // Detect and preload animated object frames
+      const animKey = `obj-anim:${obj.baseKey}`;
+      if (!taskMap.has(animKey)) {
+        // Capture all objects sharing the same baseKey so we can assign animation data
+        const objsWithSameBase = [];
+        for (const l of map.layers ?? []) {
+          for (const o of l.objects ?? []) {
+            if (o.baseKey === obj.baseKey) objsWithSameBase.push(o);
+          }
+        }
+        addPreloadTask(taskMap, animKey, async () => {
+          const result = await loadAnimatedObjectFrames(obj);
+          if (result) {
+            for (const o of objsWithSameBase) {
+              o.frameCount = result.frameCount;
+              o.frameDelays = result.delays;
+            }
+          }
+          return result;
+        });
+      }
     }
   }
 
@@ -3134,12 +3214,58 @@ function drawBackgroundLayer(frontFlag) {
   }
 }
 
+// Object animation states: keyed by "layer:objId" -> { frameIndex, timerMs }
+const objectAnimStates = new Map();
+
+function updateObjectAnimations(dtMs) {
+  if (!runtime.map) return;
+
+  for (const layer of runtime.map.layers) {
+    for (const obj of layer.objects) {
+      if (!obj.frameDelays || obj.frameCount <= 1) continue;
+
+      const stateKey = `${layer.layerIndex}:${obj.id}`;
+      let state = objectAnimStates.get(stateKey);
+      if (!state) {
+        state = { frameIndex: 0, timerMs: 0 };
+        objectAnimStates.set(stateKey, state);
+      }
+
+      state.timerMs += dtMs;
+      const delay = obj.frameDelays[state.frameIndex % obj.frameDelays.length];
+      if (state.timerMs >= delay) {
+        state.timerMs -= delay;
+        state.frameIndex = (state.frameIndex + 1) % obj.frameCount;
+      }
+    }
+  }
+}
+
 function drawMapLayer(layer) {
   for (const obj of layer.objects) {
+    // Determine which frame to show
+    let frameKey = obj.key;
+    if (obj.frameDelays && obj.frameCount > 1) {
+      const stateKey = `${layer.layerIndex}:${obj.id}`;
+      const state = objectAnimStates.get(stateKey);
+      if (state) {
+        frameKey = `${obj.baseKey}:${state.frameIndex}`;
+      }
+    }
+
     requestObjectMeta(obj);
-    const image = getImageByKey(obj.key);
-    const meta = metaCache.get(obj.key);
-    if (!image || !meta) continue;
+    const image = getImageByKey(frameKey);
+    const meta = metaCache.get(frameKey);
+    if (!image || !meta) {
+      // Fallback to original frame key
+      const fbImage = getImageByKey(obj.key);
+      const fbMeta = metaCache.get(obj.key);
+      if (fbImage && fbMeta) {
+        const origin = fbMeta.vectors.origin ?? { x: 0, y: 0 };
+        drawWorldImage(fbImage, obj.x - origin.x, obj.y - origin.y);
+      }
+      continue;
+    }
 
     const origin = meta.vectors.origin ?? { x: 0, y: 0 };
     const worldX = obj.x - origin.x;
@@ -3893,6 +4019,7 @@ function update(dt) {
   updateHiddenPortalState(dt);
   updateFaceAnimation(dt);
   updateLifeAnimations(dt * 1000);
+  updateObjectAnimations(dt * 1000);
   updateCamera(dt);
   updateSummary();
 }
@@ -3964,6 +4091,27 @@ function unlockAudio() {
   }
 }
 
+const BGM_FADE_DURATION_MS = 800;
+const BGM_TARGET_VOLUME = 0.25;
+
+function fadeOutAudio(audio, durationMs) {
+  if (!audio) return;
+  const startVol = audio.volume;
+  const startTime = performance.now();
+  const tick = () => {
+    const elapsed = performance.now() - startTime;
+    const t = Math.min(elapsed / durationMs, 1);
+    audio.volume = startVol * (1 - t);
+    if (t < 1) {
+      requestAnimationFrame(tick);
+    } else {
+      audio.pause();
+      audio.volume = 0;
+    }
+  };
+  requestAnimationFrame(tick);
+}
+
 async function playBgmPath(bgmPath) {
   if (!bgmPath) return;
 
@@ -3981,19 +4129,19 @@ async function playBgmPath(bgmPath) {
       return;
     }
 
+    // Fade out previous BGM instead of hard stop
     if (runtime.bgmAudio) {
-      runtime.bgmAudio.pause();
+      fadeOutAudio(runtime.bgmAudio, BGM_FADE_DURATION_MS);
       runtime.bgmAudio = null;
     }
 
     const audio = new Audio(dataUri);
     audio.loop = true;
-    audio.volume = 0.25;
+    audio.volume = BGM_TARGET_VOLUME;
     runtime.bgmAudio = audio;
 
     await audio.play();
     runtime.audioUnlocked = true;
-    setStatus(`Loaded map ${runtime.mapId}. BGM playing: ${bgmPath}`);
   } catch (error) {
     if (error.name === "NotAllowedError") {
       // Browser autoplay blocked — clear bgmAudio so unlockAudio() can retry
@@ -4108,8 +4256,9 @@ async function loadMap(mapId, spawnPortalName = null, spawnFromPortalTransfer = 
     runtime.loading.label = "Assets loaded";
     runtime.loading.active = false;
 
-    // Initialize life (mob/NPC) animation states
+    // Initialize animation states
     initLifeRuntimeStates();
+    objectAnimStates.clear();
 
     // Restore chat UI after loading
     if (chatBarEl) chatBarEl.style.display = "";
