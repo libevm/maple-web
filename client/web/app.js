@@ -1337,9 +1337,8 @@ const ATTACK_COOLDOWN_MS = 600;    // minimum time between attacks
 // apply_damage sets counter=170, HIT exits at counter>200 → ~30 ticks of KB force
 const MOB_KB_FORCE_GROUND = 0.2;   // C++ KBFORCE when onground
 const MOB_KB_FORCE_AIR = 0.1;      // C++ KBFORCE when airborne
-const MOB_KB_COUNTER_START = 138;   // counter start → exits at 200 = 62 ticks × 8ms ≈ 0.5s HIT
-const MOB_KB_COUNTER_EXIT = 200;    // C++ HIT: next = counter > 200
-const MOB_KB_IMPULSE = 3.0;         // immediate hspeed impulse on hit for visible pushback
+const MOB_KB_COUNTER_START = 170;   // C++ apply_damage: counter = 170
+const MOB_KB_COUNTER_EXIT = 200;    // C++ HIT: next = counter > 200 (31 ticks × 8ms = 248ms)
 
 // C++ damage formula constants
 // Weapon multiplier for 1H Sword (from C++ get_multiplier)
@@ -1636,24 +1635,87 @@ function mobNextMove(state, anim) {
 
 /**
  * Full physics step for a mob/NPC PhysicsObject.
+ * Mirrors C++ physics.move_object(phobj):
+ *   1. fht.update_fh(phobj)        — foothold tracking
+ *   2. move_normal(phobj)           — forces → hacc → hspeed/vspeed
+ *   3. fht.limit_movement(phobj)    — wall/edge collision on next position
+ *   4. phobj.move()                 — x += hspeed, y += vspeed
  */
 function mobPhysicsStep(map, phobj, isSwimMap) {
-  // --- 1. Forces ---
+  // ── Step 1: C++ fht.update_fh — foothold tracking (BEFORE physics) ──
+  if (phobj.onGround) {
+    const curFh = map.footholdById?.get(String(phobj.fhId));
+    if (curFh) {
+      let newFhId = phobj.fhId;
+
+      if (phobj.x > fhRight(curFh)) {
+        newFhId = curFh.nextId || "0";
+      } else if (phobj.x < fhLeft(curFh)) {
+        newFhId = curFh.prevId || "0";
+      }
+
+      if (newFhId === "0" || !newFhId) {
+        const below = fhIdBelow(map, phobj.x, phobj.y);
+        if (below) {
+          phobj.fhId = below.id;
+          phobj.fhSlope = fhSlope(below);
+        } else {
+          // C++ fhid=0 fallback: phobj.fhid = curfh.id(); phobj.limitx(curfh.x1())
+          phobj.fhId = curFh.id;
+          if (phobj.x > fhRight(curFh)) phobj.x = fhRight(curFh);
+          else phobj.x = fhLeft(curFh);
+          phobj.hspeed = 0;
+        }
+      } else {
+        const nxtFh = map.footholdById?.get(String(newFhId));
+        if (nxtFh && !fhIsWall(nxtFh)) {
+          phobj.fhId = nxtFh.id;
+          phobj.fhSlope = fhSlope(nxtFh);
+        } else {
+          phobj.fhId = curFh.id;
+          if (phobj.x > fhRight(curFh)) phobj.x = fhRight(curFh);
+          else phobj.x = fhLeft(curFh);
+          phobj.hspeed = 0;
+        }
+      }
+    }
+
+    // C++ update_fh sets onground = (y == ground)
+    const snapFh = map.footholdById?.get(String(phobj.fhId));
+    if (snapFh) {
+      const gy = fhGroundAt(snapFh, phobj.x);
+      if (gy !== null) {
+        phobj.y = gy;
+        phobj.onGround = true;
+      } else {
+        phobj.onGround = false;
+      }
+    }
+  } else {
+    // Airborne: C++ update_fh does fhid = get_fhid_below(x, y)
+    const below = fhIdBelow(map, phobj.x, phobj.y);
+    if (below) {
+      phobj.fhId = below.id;
+      phobj.fhSlope = fhSlope(below);
+    }
+  }
+
+  // ── Step 2: C++ move_normal — compute acceleration, update speed ──
   let hacc = 0, vacc = 0;
 
   if (phobj.onGround) {
     hacc = phobj.hforce;
     vacc = phobj.vforce;
-    const slope = phobj.fhSlope;
-    if (hacc === 0 && Math.abs(phobj.hspeed) < 0.1) {
+
+    if (hacc === 0 && phobj.hspeed < 0.1 && phobj.hspeed > -0.1) {
       phobj.hspeed = 0;
     } else {
       const inertia = phobj.hspeed / MOB_GROUNDSLIP;
-      const sf = Math.max(-0.5, Math.min(0.5, slope));
+      const sf = Math.max(-0.5, Math.min(0.5, phobj.fhSlope));
       hacc -= (MOB_FRICTION + MOB_SLOPEFACTOR * (1 + sf * -inertia)) * inertia;
     }
   } else {
-    // Airborne — gravity
+    // Airborne
     if (isSwimMap) {
       hacc = phobj.hforce - MOB_SWIMFRICTION * phobj.hspeed;
       vacc = phobj.vforce - MOB_SWIMFRICTION * phobj.vspeed + MOB_SWIMGRAVFORCE;
@@ -1667,114 +1729,54 @@ function mobPhysicsStep(map, phobj, isSwimMap) {
   phobj.hspeed += hacc;
   phobj.vspeed += vacc;
 
-  // --- 2. Horizontal movement + limits ---
-  const prevX = phobj.x;
-  const nextX = phobj.x + phobj.hspeed;
-
-  if (phobj.onGround && Math.abs(phobj.hspeed) > 0.001) {
+  // ── Step 3: C++ fht.limit_movement — wall/edge collision on NEXT position ──
+  // C++ checks crnt_x vs next_x = x + hspeed (BEFORE move)
+  if (phobj.onGround && (phobj.hspeed > 0.001 || phobj.hspeed < -0.001)) {
+    const crntX = phobj.x;
+    const nextX = phobj.x + phobj.hspeed;
     const left = phobj.hspeed < 0;
 
     // Wall check
     let wall = fhWall(map, phobj.fhId, left, phobj.y);
-    let blocked = left ? (prevX >= wall && nextX <= wall) : (prevX <= wall && nextX >= wall);
+    let collision = left ? (crntX >= wall && nextX <= wall) : (crntX <= wall && nextX >= wall);
 
     // Edge check (TURNATEDGES)
-    if (!blocked && phobj.turnAtEdges) {
+    if (!collision && phobj.turnAtEdges) {
       wall = fhEdge(map, phobj.fhId, left);
-      blocked = left ? (prevX >= wall && nextX <= wall) : (prevX <= wall && nextX >= wall);
+      collision = left ? (crntX >= wall && nextX <= wall) : (crntX <= wall && nextX >= wall);
     }
 
-    if (blocked) {
+    if (collision) {
+      // C++ phobj.limitx(wall): x = wall, hspeed = 0
       phobj.x = wall;
       phobj.hspeed = 0;
-      phobj.turnAtEdges = false;
-    } else {
-      phobj.x = nextX;
+      phobj.turnAtEdges = false; // C++ clear_flag(TURNATEDGES)
     }
-  } else {
-    phobj.x += phobj.hspeed;
   }
 
-  // --- 3. Vertical movement + landing ---
-  const prevY = phobj.y;
-  phobj.y += phobj.vspeed;
-
-  if (!phobj.onGround && phobj.vspeed >= 0) {
-    // Falling — find foothold below that we crossed through
-    const landFh = fhIdBelow(map, phobj.x, prevY);
+  // Vertical limits
+  if (!phobj.onGround && phobj.vspeed > 0) {
+    const crntY = phobj.y;
+    const nextY = phobj.y + phobj.vspeed;
+    const landFh = fhIdBelow(map, phobj.x, crntY);
     if (landFh) {
       const gy = fhGroundAt(landFh, phobj.x);
-      if (gy !== null && prevY <= gy + 1 && phobj.y >= gy - 1) {
+      if (gy !== null && crntY <= gy + 1 && nextY >= gy - 1) {
+        // C++ phobj.limity(ground): y = ground, vspeed = 0
         phobj.y = gy;
         phobj.vspeed = 0;
         phobj.onGround = true;
         phobj.fhId = landFh.id;
         phobj.fhSlope = fhSlope(landFh);
+        // Don't apply move — already landed
         return;
       }
     }
   }
 
-  // --- 4. C++ update_fh: foothold tracking when on ground ---
-  if (phobj.onGround) {
-    const curFh = map.footholdById?.get(String(phobj.fhId));
-    if (curFh) {
-      let newFhId = phobj.fhId;
-
-      // C++ update_fh: follow prev/next chain based on x position
-      if (phobj.x > fhRight(curFh)) {
-        newFhId = curFh.nextId || "0";
-      } else if (phobj.x < fhLeft(curFh)) {
-        newFhId = curFh.prevId || "0";
-      }
-
-      if (newFhId === "0" || !newFhId) {
-        // C++ update_fh: fhid became 0 → try get_fhid_below, else clamp back
-        // phobj.fhid = get_fhid_below(x, y); if still 0: phobj.fhid = curfh.id(); phobj.limitx(curfh.x1())
-        const below = fhIdBelow(map, phobj.x, phobj.y);
-        if (below) {
-          phobj.fhId = below.id;
-          phobj.fhSlope = fhSlope(below);
-        } else {
-          // Clamp back to current foothold edge (C++ limitx)
-          phobj.fhId = curFh.id;
-          if (phobj.x > fhRight(curFh)) {
-            phobj.x = fhRight(curFh);
-          } else {
-            phobj.x = fhLeft(curFh);
-          }
-          phobj.hspeed = 0;
-        }
-      } else {
-        const nxtFh = map.footholdById?.get(String(newFhId));
-        if (nxtFh && !fhIsWall(nxtFh)) {
-          phobj.fhId = nxtFh.id;
-          phobj.fhSlope = fhSlope(nxtFh);
-        } else {
-          // Next foothold is a wall or invalid → clamp
-          phobj.fhId = curFh.id;
-          if (phobj.x > fhRight(curFh)) {
-            phobj.x = fhRight(curFh);
-          } else {
-            phobj.x = fhLeft(curFh);
-          }
-          phobj.hspeed = 0;
-        }
-      }
-    }
-
-    // Snap Y to current foothold
-    const fh = map.footholdById?.get(String(phobj.fhId));
-    if (fh) {
-      const gy = fhGroundAt(fh, phobj.x);
-      if (gy !== null) {
-        phobj.y = gy;
-      } else {
-        // Walked off foothold — become airborne
-        phobj.onGround = false;
-      }
-    }
-  }
+  // ── Step 4: C++ phobj.move() — x += hspeed, y += vspeed ──
+  phobj.x += phobj.hspeed;
+  phobj.y += phobj.vspeed;
 
   // Clamp to map borders
   if (phobj.y > map.bounds.maxY + 200) {
@@ -1905,9 +1907,16 @@ function updateLifeAnimations(dtMs) {
       }
 
       // ── C++ apply force based on current stance (lines 201-236) ──
-      // HIT: no movement force — mob is staggered (initial impulse from applyAttackToMob only)
       if (state.stance === "hit1") {
-        // No force during stagger — friction decelerates the initial impulse naturally
+        // C++ case Stance::HIT:
+        //   double KBFORCE = phobj.onground ? 0.2 : 0.1;
+        //   phobj.hforce = flip ? -KBFORCE : KBFORCE;
+        // flip=true means facing right → push left (away from attacker)
+        // Our facing: 1=right, -1=left. Push opposite to facing.
+        if (state.canMove) {
+          const kbForce = ph.onGround ? MOB_KB_FORCE_GROUND : MOB_KB_FORCE_AIR;
+          ph.hforce = state.facing === 1 ? -kbForce : kbForce;
+        }
       } else if (state.behaviorState === "move") {
         // C++ case Stance::MOVE: phobj.hforce = flip ? speed : -speed;
         ph.hforce = state.facing === 1 ? state.mobSpeed : -state.mobSpeed;
@@ -2394,18 +2403,13 @@ function applyAttackToMob(target) {
     const attackerIsLeft = runtime.player.x < worldX;
     state.facing = attackerIsLeft ? -1 : 1;
 
-    // C++ counter = 170; set_stance(HIT) — reset counter + give immediate push
+    // C++ apply_damage: counter = 170; set_stance(HIT)
+    // No velocity impulse — KB comes from per-tick hforce in Mob::update
     state.hitCounter = MOB_KB_COUNTER_START;
     if (anim?.stances?.["hit1"]) {
       state.stance = "hit1";
       state.frameIndex = 0;
       state.frameTimerMs = 0;
-    }
-
-    // Immediate velocity impulse for visible pushback (away from attacker)
-    if (state.phobj) {
-      const pushDir = attackerIsLeft ? 1 : -1; // push away from attacker
-      state.phobj.hspeed = pushDir * MOB_KB_IMPULSE;
     }
   }
 
