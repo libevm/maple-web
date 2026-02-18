@@ -2252,9 +2252,15 @@ async function fadeScreenTo(targetAlpha, durationMs) {
 
 async function runPortalMapTransition(targetMapId, targetPortalName) {
   await fadeScreenTo(1, PORTAL_FADE_OUT_MS);
+  // Clear transition overlay so loading screen is visible
+  runtime.transition.alpha = 0;
+  runtime.transition.active = false;
   try {
     await loadMap(targetMapId, targetPortalName || null, true);
   } finally {
+    // Fade in from black after map loads
+    runtime.transition.alpha = 1;
+    runtime.transition.active = true;
     await fadeScreenTo(0, PORTAL_FADE_IN_MS);
   }
 }
@@ -4336,7 +4342,6 @@ function render() {
 
   if (runtime.loading.active) {
     drawLoadingScreen();
-    drawTransitionOverlay();
     return;
   }
 
