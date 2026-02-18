@@ -14,28 +14,31 @@ Status: ✅ Synced
 ## What was synced in this pass
 1. Phase 2 (Steps 8-10): Shared contracts and data model in @maple/shared-schemas
 2. Phase 3 (Steps 11-20): Build-assets pipeline in @maple/build-assets
-3. Background tiling rewrite to match C++ MapBackgrounds.cpp count-based approach
-4. Default resolution changed to 1920×1080
-5. Fixed 16:9 display mode properly constrains canvas
-6. Non-tiled background edge-extension attempted and reverted (causes ugly seams)
+3. Phase 4 (Steps 21-27): Asset API server in @maple/server
+4. Phase 5 (Steps 28-31): AssetClient loader in client runtime
+5. Background tiling rewrite to match C++ MapBackgrounds.cpp count-based approach
+6. Default resolution changed to 1920×1080
+7. Fixed 16:9 display mode properly constrains canvas
 
 ## Validation snapshot
-- ✅ `bun run ci` — 99 tests pass across all workspaces
+- ✅ `bun run ci` — 128 tests pass across all workspaces
   - shared-schemas: 35 tests
   - build-assets: 45 tests (including real WZ file extraction)
-  - client: 12 tests
-  - server: 1 test
+  - client: 23 tests (12 existing + 11 AssetClient)
+  - server: 19 tests (1 harness + 18 API integration)
   - docs: 6 tests
 
 ## Phase completion status
 - Phase 0 (Steps 1-4): ✅ Complete
 - Phase 1 (Steps 5-7): ✅ Complete
 - Phase 2 (Steps 8-10): ✅ Complete
-- Phase 3 (Steps 11-20): ✅ Complete (scanner, JSON reader, UOL resolver, map/mob/npc/character extractors, blob store, asset index, pipeline report)
-- Phase 4 (Steps 21-27): ⏳ Next — Server API
-- Phase 5 (Steps 28-32): Not started
+- Phase 3 (Steps 11-20): ✅ Complete
+- Phase 4 (Steps 21-27): ✅ Complete (Bun native HTTP server, health/metrics, asset/section/blob/batch endpoints)
+- Phase 5 (Steps 28-31): ✅ Complete (AssetClient with coalescing, LRU cache, retry, batch)
+- Phase 5 (Step 32): ⏳ Remaining — Remove direct path-based fetches from gameplay
 - Phase 6 (Steps 33-35): Scaffolding complete
 - Phase 7+: Not started
 
 ## Next expected update point
-- Phase 4 implementation: Server API on Fastify/Bun
+- Phase 5, Step 32: Migrate direct WZ path fetches to AssetClient
+- Phase 7: Networking and multiplayer

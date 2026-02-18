@@ -28,6 +28,33 @@ The docs UI includes sidebar navigation for markdown files under `docs/`.
 
 ---
 
+## 2026-02-18 07:30 (GMT+11)
+### Summary
+- Phase 4 complete: Asset API server (`@maple/server`)
+- Phase 5 (Steps 28-31) complete: AssetClient loader (`client/src/runtime/asset-client.ts`)
+- Total test count: 128 across all workspaces
+
+### Phase 4 — Asset API Server (`server/src/`)
+- Bun native HTTP server (no Fastify dependency)
+- **Endpoints**: `/health`, `/ready`, `/metrics`, `/api/v1/asset/:type/:id`, `/api/v1/asset/:type/:id/:section`, `/api/v1/blob/:hash`, `POST /api/v1/batch`
+- **Caching**: assets max-age=300, blobs immutable with ETag
+- **Headers**: CORS (Access-Control-Allow-Origin: *), X-Correlation-Id on all responses
+- **Metrics**: request count, error count, latency, uptime
+- **Data provider**: pluggable DataProvider interface, InMemoryDataProvider for testing
+- **Error handling**: typed error codes (NOT_FOUND, INVALID_TYPE, INVALID_SECTION, BATCH_TOO_LARGE)
+
+### Phase 5 — AssetClient (`client/src/runtime/asset-client.ts`)
+- **API-first**: getAsset(), getSection(), getBlob(), batch()
+- **Request coalescing**: duplicate in-flight requests share one network call
+- **LRU cache**: configurable max entries (default 2000), eviction tracking
+- **Retry**: exponential backoff (100ms base), configurable max retries
+- **Diagnostics**: cache stats, in-flight count, coalesced count, total errors
+
+### Validation
+- `bun run ci` ✅ — 128 tests
+
+---
+
 ## 2026-02-18 07:15 (GMT+11)
 ### Summary
 - Phase 2 complete: Shared contracts and data model (`@maple/shared-schemas`)
