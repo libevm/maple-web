@@ -1302,6 +1302,23 @@ const MOB_STAND_MAX_MS = 4000;
 const MOB_MOVE_MIN_MS = 2000;
 const MOB_MOVE_MAX_MS = 5000;
 
+// ─── Client-side combat demo ──────────────────────────────────────────────────
+
+const MOB_DEFAULT_HP = 100;
+const MOB_RESPAWN_DELAY_MS = 8000;
+const MOB_HP_BAR_WIDTH = 60;
+const MOB_HP_BAR_HEIGHT = 5;
+const MOB_HP_SHOW_MS = 3000;
+const DMG_NUMBER_RISE_SPEED = 80;  // px/sec
+const DMG_NUMBER_LIFETIME_MS = 1200;
+const DMG_NUMBER_FADE_START = 0.6; // fraction of lifetime before fade begins
+const PLAYER_BASE_DAMAGE_MIN = 8;
+const PLAYER_BASE_DAMAGE_MAX = 18;
+const ATTACK_COOLDOWN_MS = 350;
+
+let lastAttackTime = 0;
+const damageNumbers = []; // { x, y, value, critical, elapsed, lifetime }
+
 // NPC interaction — click any visible NPC to open dialogue (no range limit)
 
 // ─── Built-in NPC Scripts ─────────────────────────────────────────────────────
@@ -1699,6 +1716,13 @@ function initLifeRuntimeStates() {
       behaviorState: "stand",
       behaviorTimerMs: randomRange(MOB_STAND_MIN_MS, MOB_STAND_MAX_MS),
       behaviorCounter: 0,
+      // Combat state (client-side demo)
+      hp: isMob ? MOB_DEFAULT_HP : -1,
+      maxHp: isMob ? MOB_DEFAULT_HP : -1,
+      hpShowUntil: 0,
+      dying: false,
+      dead: false,
+      respawnAt: 0,
     });
   }
 }
@@ -1716,7 +1740,7 @@ function updateLifeAnimations(dtMs) {
     if (!anim) continue;
 
     // --- Mob AI + physics ---
-    if (state.canMove) {
+    if (state.canMove && !state.dying && !state.dead && state.stance !== "hit1") {
       state.behaviorTimerMs -= dtMs;
       state.behaviorCounter += dtMs;
 
@@ -1802,12 +1826,16 @@ function drawLifeSprites() {
   const cam = runtime.camera;
   const halfW = canvasEl.width / 2;
   const halfH = canvasEl.height / 2;
+  const now = performance.now();
 
   for (const [idx, state] of lifeRuntimeState) {
     const life = runtime.map.lifeEntries[idx];
     const cacheKey = `${life.type}:${life.id}`;
     const anim = lifeAnimations.get(cacheKey);
     if (!anim) continue;
+
+    // Skip fully dead mobs (waiting for respawn)
+    if (state.dead) continue;
 
     const stance = anim.stances[state.stance] ?? anim.stances["stand"];
     if (!stance || stance.frames.length === 0) continue;
@@ -1835,6 +1863,11 @@ function drawLifeSprites() {
 
     ctx.save();
 
+    // Dying mobs fade out
+    if (state.dying) {
+      ctx.globalAlpha = Math.max(0, 1 - (state.dyingElapsed ?? 0) / 600);
+    }
+
     // Facing: -1 = left (default sprite direction), 1 = right (flipped)
     const flip = state.canMove ? state.facing === 1 : life.f === 1;
 
@@ -1848,8 +1881,23 @@ function drawLifeSprites() {
 
     ctx.restore();
 
+    // Mob HP bar (shown for a few seconds after being hit)
+    if (life.type === "m" && state.hpShowUntil > now && !state.dying && state.maxHp > 0) {
+      const hpFrac = Math.max(0, state.hp / state.maxHp);
+      const barX = Math.round(screenX - MOB_HP_BAR_WIDTH / 2);
+      const barY = Math.round(screenY - frame.originY - 10);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+      ctx.fillRect(barX - 1, barY - 1, MOB_HP_BAR_WIDTH + 2, MOB_HP_BAR_HEIGHT + 2);
+      ctx.fillStyle = "#333";
+      ctx.fillRect(barX, barY, MOB_HP_BAR_WIDTH, MOB_HP_BAR_HEIGHT);
+      if (hpFrac > 0) {
+        ctx.fillStyle = hpFrac > 0.3 ? "#22c55e" : "#ef4444";
+        ctx.fillRect(barX, barY, Math.round(MOB_HP_BAR_WIDTH * hpFrac), MOB_HP_BAR_HEIGHT);
+      }
+    }
+
     // Draw name label below
-    if (anim.name) {
+    if (anim.name && !state.dying) {
       const nameColor = life.type === "n" ? "#fbbf24" : "#fb7185";
       ctx.save();
       ctx.font = "bold 11px Inter, system-ui, sans-serif";
@@ -1862,6 +1910,227 @@ function drawLifeSprites() {
       ctx.fillStyle = nameColor;
       ctx.fillText(anim.name, screenX, screenY + 4);
       ctx.restore();
+    }
+  }
+}
+
+// ─── Damage Numbers ──────────────────────────────────────────────────────────
+
+function spawnDamageNumber(worldX, worldY, value, critical) {
+  damageNumbers.push({
+    x: worldX + (Math.random() - 0.5) * 20,
+    y: worldY - 30,
+    value,
+    critical: !!critical,
+    elapsed: 0,
+    lifetime: DMG_NUMBER_LIFETIME_MS,
+  });
+}
+
+function updateDamageNumbers(dt) {
+  for (let i = damageNumbers.length - 1; i >= 0; i--) {
+    const dn = damageNumbers[i];
+    dn.elapsed += dt * 1000;
+    dn.y -= DMG_NUMBER_RISE_SPEED * dt;
+    if (dn.elapsed >= dn.lifetime) {
+      damageNumbers.splice(i, 1);
+    }
+  }
+}
+
+function drawDamageNumbers() {
+  const cam = runtime.camera;
+  const halfW = canvasEl.width / 2;
+  const halfH = canvasEl.height / 2;
+
+  for (const dn of damageNumbers) {
+    const screenX = Math.round(dn.x - cam.x + halfW);
+    const screenY = Math.round(dn.y - cam.y + halfH);
+
+    const fadeStart = dn.lifetime * DMG_NUMBER_FADE_START;
+    const alpha = dn.elapsed > fadeStart
+      ? Math.max(0, 1 - (dn.elapsed - fadeStart) / (dn.lifetime - fadeStart))
+      : 1;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = dn.critical ? "bold 20px Arial, sans-serif" : "bold 16px Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    // Shadow
+    ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+    ctx.fillText(String(dn.value), screenX + 1, screenY + 1);
+
+    // Text
+    ctx.fillStyle = dn.critical ? "#fbbf24" : "#ffffff";
+    ctx.fillText(String(dn.value), screenX, screenY);
+
+    ctx.restore();
+  }
+}
+
+// ─── Mob Combat (client-side demo) ───────────────────────────────────────────
+
+function findMobAtScreen(screenClickX, screenClickY) {
+  if (!runtime.map) return null;
+
+  const cam = runtime.camera;
+  const halfW = canvasEl.width / 2;
+  const halfH = canvasEl.height / 2;
+
+  const entries = [...lifeRuntimeState.entries()].reverse();
+  for (const [idx, state] of entries) {
+    const life = runtime.map.lifeEntries[idx];
+    if (life.type !== "m") continue;
+    if (state.dead || state.dying) continue;
+
+    const cacheKey = `m:${life.id}`;
+    const anim = lifeAnimations.get(cacheKey);
+    if (!anim) continue;
+
+    const stance = anim.stances[state.stance] ?? anim.stances["stand"];
+    if (!stance || stance.frames.length === 0) continue;
+
+    const frame = stance.frames[state.frameIndex % stance.frames.length];
+    const img = getImageByKey(frame.key);
+    if (!img) continue;
+
+    const worldX = state.phobj ? state.phobj.x : life.x;
+    const worldY = state.phobj ? state.phobj.y : life.cy;
+    const screenX = Math.round(worldX - cam.x + halfW);
+    const screenY = Math.round(worldY - cam.y + halfH);
+
+    const flip = state.canMove ? state.facing === 1 : life.f === 1;
+    const drawX = flip ? screenX - (img.width - frame.originX) : screenX - frame.originX;
+    const drawY = screenY - frame.originY;
+
+    const pad = 8;
+    if (
+      screenClickX >= drawX - pad &&
+      screenClickX <= drawX + img.width + pad &&
+      screenClickY >= drawY - pad &&
+      screenClickY <= drawY + img.height + pad
+    ) {
+      return { idx, life, anim, state };
+    }
+  }
+
+  return null;
+}
+
+function attackMob(mobResult) {
+  const now = performance.now();
+  if (now - lastAttackTime < ATTACK_COOLDOWN_MS) return;
+  lastAttackTime = now;
+
+  const state = mobResult.state;
+  if (state.dead || state.dying) return;
+
+  // Calculate damage
+  const isCritical = Math.random() < 0.15;
+  const baseDmg = PLAYER_BASE_DAMAGE_MIN + Math.floor(Math.random() * (PLAYER_BASE_DAMAGE_MAX - PLAYER_BASE_DAMAGE_MIN + 1));
+  const damage = isCritical ? Math.floor(baseDmg * 1.5) : baseDmg;
+
+  state.hp -= damage;
+  state.hpShowUntil = now + MOB_HP_SHOW_MS;
+
+  // Spawn damage number
+  const worldX = state.phobj ? state.phobj.x : mobResult.life.x;
+  const worldY = state.phobj ? state.phobj.y : mobResult.life.cy;
+  spawnDamageNumber(worldX, worldY, damage, isCritical);
+
+  // Play hit sound
+  void playSfx("Mob.img", `${mobResult.life.id.replace(/^0+/, "").padStart(7, "0")}/Damage`);
+
+  // Hit stagger — briefly switch to hit1 stance
+  const anim = mobResult.anim;
+  if (anim.stances["hit1"] && !state.dying) {
+    state.stance = "hit1";
+    state.frameIndex = 0;
+    state.frameTimerMs = 0;
+    // Return to stand after a short delay (handled in updateLifeAnimations)
+  }
+
+  // Check for death
+  if (state.hp <= 0) {
+    state.hp = 0;
+    state.dying = true;
+    state.dyingElapsed = 0;
+    if (anim.stances["die1"]) {
+      state.stance = "die1";
+      state.frameIndex = 0;
+      state.frameTimerMs = 0;
+    }
+    // Play death sound
+    void playSfx("Mob.img", `${mobResult.life.id.replace(/^0+/, "").padStart(7, "0")}/Die`);
+    // Award EXP
+    runtime.player.exp += 3 + Math.floor(Math.random() * 5);
+    if (runtime.player.exp >= runtime.player.maxExp) {
+      // Level up!
+      runtime.player.level += 1;
+      runtime.player.exp -= runtime.player.maxExp;
+      runtime.player.maxExp = Math.floor(runtime.player.maxExp * 1.5) + 5;
+      runtime.player.maxHp += 8 + Math.floor(Math.random() * 5);
+      runtime.player.hp = runtime.player.maxHp;
+      runtime.player.maxMp += 4 + Math.floor(Math.random() * 3);
+      runtime.player.mp = runtime.player.maxMp;
+      rlog(`LEVEL UP! Now level ${runtime.player.level}`);
+    }
+  }
+}
+
+function updateMobCombatStates(dtMs) {
+  const now = performance.now();
+
+  for (const [idx, state] of lifeRuntimeState) {
+    const life = runtime.map?.lifeEntries[idx];
+    if (!life || life.type !== "m") continue;
+
+    // Hit stagger recovery — return to stand after hit1 animation completes
+    if (state.stance === "hit1" && !state.dying) {
+      const anim = lifeAnimations.get(`m:${life.id}`);
+      const hitStance = anim?.stances["hit1"];
+      if (hitStance) {
+        const frame = hitStance.frames[state.frameIndex % hitStance.frames.length];
+        if (state.frameIndex >= hitStance.frames.length - 1) {
+          state.stance = "stand";
+          state.frameIndex = 0;
+          state.frameTimerMs = 0;
+          state.behaviorState = "stand";
+          state.behaviorTimerMs = randomRange(500, 1500);
+        }
+      }
+    }
+
+    // Dying fade-out
+    if (state.dying && !state.dead) {
+      state.dyingElapsed = (state.dyingElapsed ?? 0) + dtMs;
+      const anim = lifeAnimations.get(`m:${life.id}`);
+      const dieStance = anim?.stances["die1"];
+      // Wait for die animation to finish + fade
+      const dieAnimDone = !dieStance || state.frameIndex >= dieStance.frames.length - 1;
+      if (state.dyingElapsed > 800 && dieAnimDone) {
+        state.dead = true;
+        state.respawnAt = now + MOB_RESPAWN_DELAY_MS;
+      }
+    }
+
+    // Respawn
+    if (state.dead && state.respawnAt > 0 && now >= state.respawnAt) {
+      state.dead = false;
+      state.dying = false;
+      state.dyingElapsed = 0;
+      state.hp = state.maxHp;
+      state.stance = "stand";
+      state.frameIndex = 0;
+      state.frameTimerMs = 0;
+      state.behaviorState = "stand";
+      state.behaviorTimerMs = randomRange(MOB_STAND_MIN_MS, MOB_STAND_MAX_MS);
+      // Reset position to spawn
+      state.phobj.x = life.x;
+      state.phobj.y = life.cy;
+      state.respawnAt = 0;
     }
   }
 }
@@ -5223,64 +5492,64 @@ function drawPlayerNameLabel() {
 
 // ─── Status Bar (HP / MP / EXP) ──────────────────────────────────────────────
 
-const STATUSBAR_HEIGHT = 38;
-const STATUSBAR_BAR_HEIGHT = 12;
-const STATUSBAR_BAR_GAP = 3;
-const STATUSBAR_PADDING_H = 12;
-const STATUSBAR_PADDING_V = 6;
+const STATUSBAR_HEIGHT = 34;
+const STATUSBAR_BAR_HEIGHT = 14;
+const STATUSBAR_PADDING_H = 10;
 
 function drawStatusBar() {
   const player = runtime.player;
   const cw = canvasEl.width;
   const ch = canvasEl.height;
-
   const barY = ch - STATUSBAR_HEIGHT;
-  const barWidth = Math.min(600, cw - 40);
-  const barX = Math.round((cw - barWidth) / 2);
 
-  // Background panel
   ctx.save();
-  ctx.fillStyle = "rgba(10, 15, 30, 0.82)";
-  roundRect(ctx, barX, barY, barWidth, STATUSBAR_HEIGHT, 6);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(80, 100, 140, 0.6)";
-  ctx.lineWidth = 1;
-  ctx.stroke();
 
-  // Level + job label on left
+  // Full-width background
+  ctx.fillStyle = "rgba(10, 15, 30, 0.88)";
+  ctx.fillRect(0, barY, cw, STATUSBAR_HEIGHT);
+  ctx.fillStyle = "rgba(80, 100, 140, 0.35)";
+  ctx.fillRect(0, barY, cw, 1);
+
+  // EXP bar — thin strip along very top edge
+  const expBarH = 3;
+  const expFrac = player.maxExp > 0 ? Math.min(1, player.exp / player.maxExp) : 0;
+  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+  ctx.fillRect(0, barY + 1, cw, expBarH);
+  if (expFrac > 0) {
+    ctx.fillStyle = "#facc15";
+    ctx.fillRect(0, barY + 1, Math.round(cw * expFrac), expBarH);
+  }
+
+  // Layout: [Level/Job] [HP bar ~~~~~~~~~~~~] [MP bar ~~~~~~~~~~~~]
+  const contentY = barY + expBarH + 4;
+  const levelLabelW = 80;
+
+  // Level + job
   ctx.font = "bold 11px Arial, sans-serif";
   ctx.textBaseline = "middle";
   ctx.textAlign = "left";
   ctx.fillStyle = "#fbbf24";
-  ctx.fillText(`Lv.${player.level}`, barX + STATUSBAR_PADDING_H, barY + STATUSBAR_HEIGHT / 2 - 7);
+  const barMidY = contentY + STATUSBAR_BAR_HEIGHT / 2;
+  ctx.fillText(`Lv.${player.level}`, STATUSBAR_PADDING_H, barMidY - 1);
+  const lvTextW = ctx.measureText(`Lv.${player.level}`).width;
   ctx.fillStyle = "#94a3b8";
   ctx.font = "10px Arial, sans-serif";
-  ctx.fillText(player.job, barX + STATUSBAR_PADDING_H, barY + STATUSBAR_HEIGHT / 2 + 7);
+  ctx.fillText(player.job, STATUSBAR_PADDING_H + lvTextW + 6, barMidY - 1);
 
-  // Gauge bars on right
-  const labelWidth = 70;
-  const gaugeX = barX + labelWidth;
-  const gaugeW = barWidth - labelWidth - STATUSBAR_PADDING_H;
+  // Gauge area: split remaining width between HP and MP
+  const gaugeStart = levelLabelW + 30;
+  const gaugeEnd = cw - STATUSBAR_PADDING_H;
+  const totalGaugeW = gaugeEnd - gaugeStart;
+  const gaugeGap = 8;
+  const singleGaugeW = Math.floor((totalGaugeW - gaugeGap) / 2);
 
   // HP bar
-  const hpY = barY + STATUSBAR_PADDING_V;
-  drawGaugeBar(gaugeX, hpY, gaugeW, STATUSBAR_BAR_HEIGHT,
+  drawGaugeBar(gaugeStart, contentY, singleGaugeW, STATUSBAR_BAR_HEIGHT,
     player.hp, player.maxHp, "#ef4444", "#7f1d1d", "HP");
 
   // MP bar
-  const mpY = hpY + STATUSBAR_BAR_HEIGHT + STATUSBAR_BAR_GAP;
-  drawGaugeBar(gaugeX, mpY, gaugeW, STATUSBAR_BAR_HEIGHT,
+  drawGaugeBar(gaugeStart + singleGaugeW + gaugeGap, contentY, singleGaugeW, STATUSBAR_BAR_HEIGHT,
     player.mp, player.maxMp, "#3b82f6", "#1e3a5f", "MP");
-
-  // EXP bar — thin bar along the very top of status panel
-  const expBarH = 3;
-  const expFrac = player.maxExp > 0 ? Math.min(1, player.exp / player.maxExp) : 0;
-  ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
-  ctx.fillRect(barX + 1, barY + 1, barWidth - 2, expBarH);
-  if (expFrac > 0) {
-    ctx.fillStyle = "#facc15";
-    ctx.fillRect(barX + 1, barY + 1, Math.round((barWidth - 2) * expFrac), expBarH);
-  }
 
   ctx.restore();
 }
@@ -5301,17 +5570,18 @@ function drawGaugeBar(x, y, w, h, current, max, fillColor, bgColor, label) {
     ctx.fill();
   }
 
-  // Text
+  // Label on left
   ctx.save();
   ctx.font = "bold 10px Arial, sans-serif";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-  ctx.fillText(label, x + 4, y + h / 2 + 1);
+  ctx.fillText(label, x + 5, y + h / 2 + 1);
 
+  // Value on right
   ctx.textAlign = "right";
   ctx.font = "10px Arial, sans-serif";
-  ctx.fillText(`${current}/${max}`, x + w - 4, y + h / 2 + 1);
+  ctx.fillText(`${current}/${max}`, x + w - 5, y + h / 2 + 1);
   ctx.restore();
 }
 
@@ -5588,6 +5858,7 @@ function render() {
   drawMapLayersWithCharacter();
   drawReactors();
   drawLifeSprites();
+  drawDamageNumbers();
   if (runtime.debug.overlayEnabled && runtime.debug.showRopes) {
     drawRopeGuides();
   }
@@ -5714,6 +5985,8 @@ function update(dt) {
   updateHiddenPortalState(dt);
   updateFaceAnimation(dt);
   updateLifeAnimations(dt * 1000);
+  updateMobCombatStates(dt * 1000);
+  updateDamageNumbers(dt);
   updateReactorAnimations(dt * 1000);
   updateObjectAnimations(dt * 1000);
   updateBackgroundAnimations(dt * 1000);
@@ -6005,6 +6278,7 @@ async function loadMap(mapId, spawnPortalName = null, spawnFromPortalTransfer = 
     objectAnimStates.clear();
     bgAnimStates.clear();
     closeNpcDialogue();
+    damageNumbers.length = 0;
 
     // Restore chat UI after loading
     if (chatBarEl) chatBarEl.style.display = "";
@@ -6075,8 +6349,9 @@ function bindInput() {
       runtime.npcDialogue.hoveredOption = foundOption;
       canvasEl.style.cursor = foundOption >= 0 ? "pointer" : "";
     } else if (!runtime.loading.active && !runtime.portalWarpInProgress && runtime.map) {
-      const npc = findNpcAtScreen(screenX, screenY);
-      canvasEl.style.cursor = npc ? "pointer" : "";
+      const mob = findMobAtScreen(screenX, screenY);
+      const npc = mob ? null : findNpcAtScreen(screenX, screenY);
+      canvasEl.style.cursor = (mob || npc) ? "pointer" : "";
     } else {
       canvasEl.style.cursor = "";
     }
@@ -6125,13 +6400,19 @@ function bindInput() {
       }
     }
 
-    // Check NPC click (only when not loading/transitioning)
+    // Check mob/NPC click (only when not loading/transitioning)
     if (!runtime.loading.active && !runtime.portalWarpInProgress && runtime.map) {
-      const npc = findNpcAtScreen(cx, cy);
-      if (npc) {
-        openNpcDialogue(npc);
+      // Try mob attack first
+      const mob = findMobAtScreen(cx, cy);
+      if (mob) {
+        attackMob(mob);
       } else {
-        rlog(`click at screen(${Math.round(cx)},${Math.round(cy)}) world(${Math.round(runtime.mouseWorld.x)},${Math.round(runtime.mouseWorld.y)}) — no NPC hit`);
+        const npc = findNpcAtScreen(cx, cy);
+        if (npc) {
+          openNpcDialogue(npc);
+        } else {
+          rlog(`click at screen(${Math.round(cx)},${Math.round(cy)}) world(${Math.round(runtime.mouseWorld.x)},${Math.round(runtime.mouseWorld.y)}) — no hit`);
+        }
       }
     }
   });
@@ -6197,7 +6478,8 @@ function bindInput() {
       return;
     }
 
-    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space"].includes(event.code)) {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space",
+         "PageUp", "PageDown", "Home", "End", "Tab"].includes(event.code)) {
       event.preventDefault();
     }
 

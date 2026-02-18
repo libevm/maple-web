@@ -28,6 +28,34 @@ The docs UI includes sidebar navigation for markdown files under `docs/`.
 
 ---
 
+## 2026-02-18 08:20 (GMT+11)
+### Summary
+- Client-side combat: click mobs to attack, damage numbers, mob HP bars, death/respawn, EXP/leveling
+
+### Combat System
+- **Click-to-attack**: click any mob to deal damage (350ms cooldown)
+- **Damage numbers**: white (normal) or gold (critical, 15% chance), float upward and fade out
+- **Mob HP bars**: green/red gauge above mob sprite, shown 3s after hit
+- **Hit animation**: mob briefly plays `hit1` stance, then returns to patrol
+- **Death animation**: mob plays `die1` stance, fades out over 800ms, marked dead
+- **Respawn**: 8s after death, mob reappears at original spawn with full HP
+- **EXP/leveling**: 3-7 EXP per kill, level up increases maxHP/MP/EXP
+- **SFX**: mob-specific Damage/Die sounds from Sound.wz/Mob.img
+- **Cursor**: pointer on mob hover (mob > NPC priority)
+- **Mob AI paused**: during hit stagger and death — no patrol movement
+
+### Status Bar Fix
+- Full-width horizontal bar at bottom of canvas
+- Chat bar + chat log pushed up above status bar via CSS `bottom` offset
+
+### Input Fix
+- PageDown/PageUp/Home/End/Tab now prevented from default browser behavior when game input active
+
+### Validation
+- Automated: `bun run ci` ✅ — all tests pass
+
+---
+
 ## 2026-02-18 08:00 (GMT+11)
 ### Summary
 - Player HUD: name label, HP/MP/EXP status bar, map name banner on map load

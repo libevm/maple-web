@@ -1,6 +1,6 @@
 # .memory Sync Status
 
-Last synced: 2026-02-18T08:00:00+11:00
+Last synced: 2026-02-18T08:20:00+11:00
 Status: ✅ Synced
 
 ## Current authoritative memory files
@@ -38,6 +38,20 @@ Status: ✅ Synced
    - Status bar: HP/MP gauge bars + EXP bar + level/job display at canvas bottom
    - Map name banner: street name + map name shown on map load, fades out after 3s
    - Player state: `name`, `level`, `job`, `hp/maxHp`, `mp/maxMp`, `exp/maxExp`
+5. **Client-side combat demo** (Phase 8 visual):
+   - Click mobs to attack (350ms cooldown)
+   - Damage range: 8-18 base, 15% crit chance (1.5× multiplier)
+   - Floating damage numbers: rise at 80px/s, fade after 60% of 1200ms lifetime
+   - Mob HP bars: shown for 3s after hit, green/red color based on HP %
+   - Mob hit1 stance animation on hit, die1 + fade on death
+   - Mob respawn after 8s at original spawn position
+   - EXP on kill → level-up increases maxHP/MP/EXP
+   - Hit/Die SFX from Sound.wz/Mob.img
+   - Pointer cursor on mob hover
+   - `findMobAtScreen()` for click targeting
+   - `attackMob()` → damage calc → spawnDamageNumber() + playSfx()
+   - `updateMobCombatStates()` handles hit recovery, dying fade, respawn
+   - damageNumbers[] cleared on map change
 4. **NPC dialogue + scripts**: Full feature (click-to-talk, portraits, scripted options, travel)
 4. **Mob movement speed 3×**: `(speed+100)*0.003`
 5. **Duplicate `roundRect` removed**

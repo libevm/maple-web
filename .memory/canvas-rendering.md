@@ -23,20 +23,21 @@ tick(timestampMs)          ← requestAnimationFrame
 4. drawBackgroundLayer(0)       ← back backgrounds (front=0)
 5. drawMapLayersWithCharacter() ← tiles + objects + player (z-sorted)
 6. drawReactors()               ← reactor sprites (state 0 idle)
-7. drawLifeSprites()            ← mobs + NPCs
-8. drawRopeGuides()             ← debug overlay (if enabled)
-9. drawPortals()                ← portal sprites
-10. drawFootholdOverlay()       ← debug overlay (if enabled)
-11. drawLifeMarkers()           ← debug overlay (if enabled)
+7. drawLifeSprites()            ← mobs + NPCs + mob HP bars
+8. drawDamageNumbers()          ← floating damage text from combat
+9. drawRopeGuides()             ← debug overlay (if enabled)
+10. drawPortals()               ← portal sprites
+11. drawFootholdOverlay()       ← debug overlay (if enabled)
+12. drawLifeMarkers()           ← debug overlay (if enabled)
     drawReactorMarkers()        ← debug overlay (magenta, if life markers enabled)
-12. drawBackgroundLayer(1)      ← front backgrounds (front=1)
-13. drawChatBubble()
-14. drawPlayerNameLabel()       ← player name tag below character
-15. drawStatusBar()             ← HP/MP/EXP bars at bottom center
-16. drawMapBanner()             ← map name fades in on map entry
-17. drawMinimap()
-18. drawNpcDialogue()           ← NPC dialogue box with portrait + options
-19. drawTransitionOverlay()     ← fade-in/out black overlay
+13. drawBackgroundLayer(1)      ← front backgrounds (front=1)
+14. drawChatBubble()
+15. drawPlayerNameLabel()       ← player name tag below character
+16. drawStatusBar()             ← HP/MP/EXP bars at bottom
+17. drawMapBanner()             ← map name fades in on map entry
+18. drawMinimap()
+19. drawNpcDialogue()           ← NPC dialogue box with portrait + options
+20. drawTransitionOverlay()     ← fade-in/out black overlay
 ```
 
 ## Coordinate Systems
@@ -348,6 +349,10 @@ tryUsePortal()
 - **Map name banner** (`drawMapBanner()`): shows map name (gold, large) and street name (gray, small)
   at 18% screen height on map load. Fades out over 800ms after 3s total display.
   Triggered by `showMapBanner(mapId)` at end of `loadMap()`. Uses `getMapStringName()`/`getMapStringStreet()`.
+- **Client-side combat demo**: click mobs to attack, damage numbers float upward, mob HP bars
+  shown for 3s after hit, mob hit1/die1 stance animation, fade-out on death, respawn after 8s.
+  EXP awarded on kill with level-up system (increases maxHP/MP/EXP).
+  Pointer cursor on mob hover. Hit/Die SFX from `Sound.wz/Mob.img`.
 - **NPC interaction system**: click any visible NPC to open dialogue. No range limit.
   NPCs with known scripts (taxis, Spinel) show specific options. NPCs with unknown scripts
   show flavor text + travel options to all major towns. NPCs without scripts show flavor text.
