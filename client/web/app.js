@@ -106,8 +106,8 @@ const PORTAL_FADE_IN_MS = 240;
 const PORTAL_SCROLL_MIN_MS = 180;
 const PORTAL_SCROLL_MAX_MS = 560;
 const PORTAL_SCROLL_SPEED_PX_PER_SEC = 3200;
-const DEFAULT_CANVAS_WIDTH = 800;
-const DEFAULT_CANVAS_HEIGHT = 600;
+const DEFAULT_CANVAS_WIDTH = 1280;
+const DEFAULT_CANVAS_HEIGHT = 960;
 const BG_REFERENCE_WIDTH = 800;
 const BG_REFERENCE_HEIGHT = 600;
 const MIN_CANVAS_WIDTH = 640;
@@ -132,8 +132,8 @@ const CHAT_BUBBLE_VERTICAL_PADDING = 6;
 const CHAT_BUBBLE_STANDARD_WIDTH_MULTIPLIER = 3;
 const TELEPORT_PRESET_CACHE_KEY = "mapleweb.debug.teleportPreset.v1";
 const SETTINGS_CACHE_KEY = "mapleweb.settings.v1";
-const FIXED_RES_WIDTH = 800;
-const FIXED_RES_HEIGHT = 600;
+const FIXED_RES_WIDTH = 1280;
+const FIXED_RES_HEIGHT = 960;
 
 /**
  * Default equipment set for the character.
@@ -846,7 +846,7 @@ function applyFixedRes() {
     const vw = window.innerWidth || DEFAULT_CANVAS_WIDTH;
     const vh = window.innerHeight || DEFAULT_CANVAS_HEIGHT;
 
-    // Fit 4:3 (800×600) display within viewport (CSS display size)
+    // Fit 4:3 (1280×960) display within viewport (CSS display size)
     let displayW, displayH;
     if (vw / vh > 4 / 3) {
       displayH = vh;
@@ -873,7 +873,7 @@ function syncCanvasResolution() {
     const vw = window.innerWidth || DEFAULT_CANVAS_WIDTH;
     const vh = window.innerHeight || DEFAULT_CANVAS_HEIGHT;
 
-    // If viewport >= fixed resolution, lock canvas buffer to 800×600
+    // If viewport >= fixed resolution, lock canvas buffer to 1280×960
     // and let CSS scale the display. If smaller, use viewport size.
     if (vw >= FIXED_RES_WIDTH && vh >= FIXED_RES_HEIGHT) {
       nextWidth = FIXED_RES_WIDTH;
@@ -1331,7 +1331,13 @@ const DMG_NUMBER_RISE_SPEED = 80;  // px/sec
 const DMG_NUMBER_LIFETIME_MS = 1200;
 const DMG_NUMBER_FADE_START = 0.6; // fraction of lifetime before fade begins
 const ATTACK_COOLDOWN_MS = 600;    // minimum time between attacks
-const MOB_KNOCKBACK_PX = 30;       // pixels mob is pushed back on hit
+
+// C++ knockback constants (from Mob::update HIT stance + Mob::apply_damage)
+// apply_damage sets counter=170, HIT exits at counter>200 → ~30 ticks of KB force
+const MOB_KB_FORCE_GROUND = 0.2;   // C++ KBFORCE when onground
+const MOB_KB_FORCE_AIR = 0.1;      // C++ KBFORCE when airborne
+const MOB_KB_COUNTER_START = 170;   // C++ counter = 170 on hit
+const MOB_KB_COUNTER_EXIT = 200;    // C++ exits HIT when counter > 200
 
 // C++ damage formula constants
 // Weapon multiplier for 1H Sword (from C++ get_multiplier)
@@ -1754,6 +1760,7 @@ function initLifeRuntimeStates() {
       hp: isMob ? MOB_DEFAULT_HP : -1,
       maxHp: isMob ? MOB_DEFAULT_HP : -1,
       hpShowUntil: 0,
+      hitCounter: 0,       // C++ counter for HIT stance duration
       dying: false,
       dead: false,
       respawnAt: 0,
@@ -2180,22 +2187,21 @@ function applyAttackToMob(target) {
   // Play hit sound
   void playSfx("Mob.img", `${life.id.replace(/^0+/, "").padStart(7, "0")}/Damage`);
 
-  // C++ Mob::apply_damage: knockback when damage >= mob.knockback
+  // C++ Mob::apply_damage: knockback when damage >= mob.knockback threshold
+  // Sets flip toward attacker, counter=170, stance=HIT.
+  // The per-tick force is applied in updateMobCombatStates (mirrors Mob::update HIT case).
   if (!result.miss && result.damage >= mobKnockback && !state.dying) {
-    // Hit stagger — switch to hit1 stance
+    // C++ flip = toleft (face the attacker)
+    const attackerIsLeft = runtime.player.x < worldX;
+    state.facing = attackerIsLeft ? -1 : 1;
+
+    // C++ counter = 170; set_stance(HIT)
+    state.hitCounter = MOB_KB_COUNTER_START;
     if (anim?.stances?.["hit1"]) {
       state.stance = "hit1";
       state.frameIndex = 0;
       state.frameTimerMs = 0;
     }
-
-    // Knockback: push mob away from player
-    const pushDir = runtime.player.facing; // facing direction = attack direction
-    if (state.phobj) {
-      state.phobj.x += pushDir * MOB_KNOCKBACK_PX;
-    }
-    // C++ sets counter=170 and flips mob to face the attacker
-    state.facing = -pushDir;
   }
 
   // Check for death
@@ -2259,23 +2265,53 @@ function updatePlayerAttack(dt) {
 
 function updateMobCombatStates(dtMs) {
   const now = performance.now();
+  // Number of fixed timestep ticks this frame (~30fps C++ tick)
+  const numTicks = Math.max(1, Math.round(dtMs / MOB_PHYS_TIMESTEP));
 
   for (const [idx, state] of lifeRuntimeState) {
     const life = runtime.map?.lifeEntries[idx];
     if (!life || life.type !== "m") continue;
 
-    // Hit stagger recovery — return to stand after hit1 animation completes
+    // ── C++ Mob::update HIT stance: apply knockback force per tick ──
+    // C++ code: case Stance::HIT:
+    //   double KBFORCE = phobj.onground ? 0.2 : 0.1;
+    //   phobj.hforce = flip ? -KBFORCE : KBFORCE;
+    // counter++ each tick, exits HIT when counter > 200
     if (state.stance === "hit1" && !state.dying) {
-      const anim = lifeAnimations.get(`m:${life.id}`);
-      const hitStance = anim?.stances["hit1"];
-      if (hitStance) {
-        if (state.frameIndex >= hitStance.frames.length - 1) {
-          state.stance = "stand";
-          state.frameIndex = 0;
-          state.frameTimerMs = 0;
-          state.behaviorState = "stand";
-          state.behaviorTimerMs = randomRange(500, 1500);
+      state.hitCounter += numTicks;
+
+      if (state.hitCounter > MOB_KB_COUNTER_EXIT) {
+        // C++ next_move() — exit HIT, return to patrol
+        state.stance = "stand";
+        state.frameIndex = 0;
+        state.frameTimerMs = 0;
+        state.hitCounter = 0;
+        state.behaviorState = "stand";
+        state.behaviorTimerMs = randomRange(500, 1500);
+      } else if (state.phobj && state.canMove) {
+        // Apply knockback force each tick (C++ Mob::update HIT case)
+        const onGround = state.phobj.onGround;
+        const kbForce = onGround ? MOB_KB_FORCE_GROUND : MOB_KB_FORCE_AIR;
+        // C++ flip convention: flip=true means facing right, hforce pushes left (-KBFORCE)
+        // Our facing: -1=left, 1=right. KB pushes opposite to facing direction.
+        const forceDir = -state.facing;
+        state.phobj.hforce = forceDir * kbForce;
+
+        // Integrate force → acceleration → speed → position (C++ move_normal)
+        // hacc = hforce, then friction: hacc -= (FRICTION + SLOPEFACTOR*(1+slope*-inertia)) * inertia
+        const hforce = state.phobj.hforce;
+        let hspeed = state.phobj.hspeed || 0;
+        const inertia = hspeed / MOB_GROUNDSLIP;
+        const slope = state.phobj.fhSlope || 0;
+        const clampedSlope = Math.max(-0.5, Math.min(0.5, slope));
+        let hacc = hforce;
+        if (onGround) {
+          hacc -= (MOB_FRICTION + MOB_SLOPEFACTOR * (1 + clampedSlope * -inertia)) * inertia;
         }
+        hspeed += hacc * numTicks;
+        state.phobj.hspeed = hspeed;
+        state.phobj.x += hspeed * numTicks;
+        state.phobj.hforce = 0;
       }
     }
 
@@ -2297,6 +2333,7 @@ function updateMobCombatStates(dtMs) {
       state.dying = false;
       state.dyingElapsed = 0;
       state.hp = state.maxHp;
+      state.hitCounter = 0;
       state.stance = "stand";
       state.frameIndex = 0;
       state.frameTimerMs = 0;
@@ -2304,6 +2341,7 @@ function updateMobCombatStates(dtMs) {
       state.behaviorTimerMs = randomRange(MOB_STAND_MIN_MS, MOB_STAND_MAX_MS);
       state.phobj.x = life.x;
       state.phobj.y = life.cy;
+      state.phobj.hspeed = 0;
       state.respawnAt = 0;
     }
   }
@@ -4577,11 +4615,13 @@ function updatePlayer(dt) {
     return;
   }
 
-  const move = (runtime.input.left ? -1 : 0) + (runtime.input.right ? 1 : 0);
-  const climbDir = (runtime.input.up ? -1 : 0) + (runtime.input.down ? 1 : 0);
-  const jumpQueued = runtime.input.jumpQueued;
-  const jumpRequested = runtime.npcDialogue.active ? false : (jumpQueued || runtime.input.jumpHeld);
-  runtime.input.jumpQueued = false;
+  // C++ Player::can_attack blocks movement while attacking — freeze all input
+  const isAttacking = player.attacking;
+  const move = isAttacking ? 0 : (runtime.input.left ? -1 : 0) + (runtime.input.right ? 1 : 0);
+  const climbDir = isAttacking ? 0 : (runtime.input.up ? -1 : 0) + (runtime.input.down ? 1 : 0);
+  const jumpQueued = isAttacking ? false : runtime.input.jumpQueued;
+  const jumpRequested = (runtime.npcDialogue.active || isAttacking) ? false : (jumpQueued || runtime.input.jumpHeld);
+  runtime.input.jumpQueued = isAttacking ? runtime.input.jumpQueued : false;
 
   const nowMs = performance.now();
   const climbOnCooldown = nowMs < player.climbCooldownUntil;
@@ -4949,12 +4989,7 @@ function updatePlayer(dt) {
   // Update attack animation (handles its own timer + termination)
   updatePlayerAttack(dt);
 
-  // Cancel attack if player starts moving or jumping (MapleStory behavior)
-  if (player.attacking && (move !== 0 || !player.onGround || player.climbing)) {
-    player.attacking = false;
-  }
-
-  // Attack stance overrides normal action while attacking (standing still)
+  // Attack stance overrides normal action — character must finish attack animation
   if (player.attacking && player.attackStance) {
     const attackAction = player.attackStance;
     if (player.action !== attackAction) {
