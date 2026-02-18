@@ -21,24 +21,27 @@ tick(timestampMs)          ← requestAnimationFrame
 2. If loading.active → drawLoadingScreen() → return
 3. If !runtime.map  → drawTransitionOverlay() → return
 4. drawBackgroundLayer(0)       ← back backgrounds (front=0)
-5. drawMapLayersWithCharacter() ← tiles + objects + player (z-sorted)
+5. drawMapLayersWithCharacter() ← per layer: drawMapLayer + drawLifeSprites(layer) + drawCharacter at playerLayer
 6. drawReactors()               ← reactor sprites (state 0 idle)
-7. drawLifeSprites()            ← mobs + NPCs + mob HP bars
-8. drawDamageNumbers()          ← floating damage text from combat
-9. drawRopeGuides()             ← debug overlay (if enabled)
-10. drawPortals()               ← portal sprites
-11. drawFootholdOverlay()       ← debug overlay (if enabled)
-12. drawLifeMarkers()           ← debug overlay (if enabled)
+7. drawDamageNumbers()          ← floating damage text from combat
+8. drawRopeGuides()             ← debug overlay (if enabled)
+9. drawPortals()                ← portal sprites
+10. drawFootholdOverlay()       ← debug overlay (if enabled)
+11. drawLifeMarkers()           ← debug overlay (if enabled)
     drawReactorMarkers()        ← debug overlay (magenta, if life markers enabled)
-13. drawBackgroundLayer(1)      ← front backgrounds (front=1)
-14. drawChatBubble()
-15. drawPlayerNameLabel()       ← player name tag below character
-16. drawStatusBar()             ← HP/MP/EXP bars at bottom
-17. drawMapBanner()             ← map name fades in on map entry
-18. drawMinimap()
-19. drawNpcDialogue()           ← NPC dialogue box with portrait + options
-20. drawTransitionOverlay()     ← fade-in/out black overlay
+12. drawBackgroundLayer(1)      ← front backgrounds (front=1)
+13. drawChatBubble()
+14. drawPlayerNameLabel()       ← player name tag below character
+15. drawStatusBar()             ← HP/MP/EXP bars at bottom
+16. drawMapBanner()             ← map name fades in on map entry
+17. drawMinimap()               ← collapsible panel with player/portal/mob/NPC/reactor dots
+18. drawNpcDialogue()           ← NPC dialogue box with portrait + options
+19. drawTransitionOverlay()     ← fade-in/out black overlay
 ```
+
+**Note:** `drawLifeSprites(filterLayer)` is called **inside** `drawMapLayersWithCharacter()`
+for each map layer — it is NOT a standalone call in `render()`. Mobs/NPCs are interleaved
+with map tiles/objects/player based on their `renderLayer` assignment.
 
 ## Coordinate Systems
 
@@ -210,13 +213,20 @@ Life sprite frames extract basedata into separate objects, so deleting `frame.ba
 - Origin-based positioning: `worldX = obj.x - origin.x`
 
 `drawMapLayersWithCharacter()`:
-- Iterates layers 0–7
-- Draws player character at the matching `footholdLayer`
-- Player at layer 7 when airborne or climbing
+- Iterates all map layers in order
+- Per layer: `drawMapLayer(layer)` → `drawLifeSprites(layerIndex)` → character (if layer matches)
+- Player render layer determined by `currentPlayerRenderLayer()`:
+  - Climbing → layer 7
+  - Airborne (not grounded) → layer 7
+  - Grounded → `player.footholdLayer`
+- Player drawn once at matching layer; if no layer matches, drawn after all layers
+- This interleaving allows higher map layers to occlude the player and lower layers to be behind
 
 ## Life Sprites (Mobs / NPCs)
 
-`drawLifeSprites()`:
+`drawLifeSprites(filterLayer)`:
+- Called per map layer from `drawMapLayersWithCharacter()`, NOT as standalone in `render()`
+- `filterLayer` parameter: only draws mobs/NPCs whose `renderLayer` matches the current layer
 - Iterates `lifeRuntimeState` entries
 - Position from `state.phobj.x` / `state.phobj.y` (physics object)
 - Screen Y uses `worldY - cam.y + halfH` — same formula as `worldToScreen`
@@ -225,6 +235,7 @@ Life sprite frames extract basedata into separate objects, so deleting `frame.ba
 - Origin-based positioning from frame metadata (`frame.originX`, `frame.originY`)
 - Does NOT use `drawWorldImage` — handles flip via `ctx.translate/scale` directly
 - Name labels: yellow for NPCs, pink for mobs
+- HP bars: green/red gauge, shown for 3s after mob is hit
 
 > **Note:** `drawLifeSprites` uses manual screen positioning (not `worldToScreen`).
 > Any changes to `worldToScreen` must be mirrored here.
@@ -310,6 +321,61 @@ tryUsePortal()
 - Logs `BAD BASEDATA` if basedata is missing/invalid
 - Logs `IMG DECODE FAIL` if browser rejects the data URI
 
+## Hidden Portal System
+
+`updateHiddenPortalState(dt)`:
+- Tracks per-portal touch state in `runtime.hiddenPortalState` Map (keyed `"x,y"`)
+- When player overlaps hidden portal bounds: accumulates `touchMs`
+- After `HIDDEN_PORTAL_REVEAL_DELAY_MS` (500ms), begins fade-in
+- Fade-in duration: `HIDDEN_PORTAL_FADE_IN_MS` (400ms)
+- When player leaves portal bounds: alpha fades out at same rate
+- Portal render (`drawPortals`) uses per-portal alpha for hidden type (`pt=10`)
+
+## Portal Momentum Scroll
+
+`startPortalMomentumScroll()` / `waitForPortalMomentumScrollToFinish()`:
+- When entering a portal, camera smoothly glides from current position to destination
+- Duration based on distance: `max(PORTAL_SCROLL_MIN_MS, min(PORTAL_SCROLL_MAX_MS, distance/speed))`
+- Constants: `PORTAL_SCROLL_MIN_MS=180`, `PORTAL_SCROLL_MAX_MS=560`, `PORTAL_SCROLL_SPEED_PX_PER_SEC=3200`
+- `updateCamera()` applies eased interpolation during scroll
+- Player position tracked during scroll to avoid camera jerk at end
+
+## Keybind Customization
+
+- Stored in `runtime.keybinds` object: `attack`, `jump`, `pickup`, `npcChat`
+- Persisted via `KEYBINDS_STORAGE_KEY` in localStorage
+- UI buttons in debug panel for rebinding (click button → press key → saved)
+- `keyCodeToDisplay()` maps `event.code` to display label
+
+## Settings System
+
+- `runtime.settings`: `bgmEnabled`, `sfxEnabled`, `fixedRes`, `minimapVisible`
+- Settings modal accessed via ⚙️ button
+- `loadSettings()` / `saveSettings()` via localStorage (`SETTINGS_CACHE_KEY`)
+- `fixedRes`: locks canvas to 1280×960 internal resolution
+- `applyFixedRes()` + `syncCanvasResolution()` handle canvas size management
+
+## Mouse-Fly Debug Mode
+
+- Toggle via debug panel checkbox
+- When enabled: player position snaps to mouse cursor position each frame
+- Bypasses all physics (gravity, footholds, walls)
+- Useful for quick map exploration and testing
+
+## NPC Dialogue System
+
+`openNpcDialogue(npcResult)` / `drawNpcDialogue()`:
+- Click NPC → opens dialogue overlay
+- Portrait: NPC sprite with scaling, positioned in left column
+- Header: NPC name + function
+- Content: word-wrapped text lines with page navigation
+- Scripted NPCs: `NPC_SCRIPTS` map keyed by scriptId
+  - Known scripts: taxis (Henesys/Ellinia/etc.), Spinel (town warps)
+  - Each script defines pages with text + clickable options
+- Option handling: hover highlight (gold), click executes action (map warp, close, etc.)
+- Fallback: NPCs without scripts show flavor text + travel options to major towns
+- Blocks player movement/jumping/portal use while active
+
 ## Known Issues / Investigation
 
 - **Blank screen on portal transition**: Under investigation. ERR_INVALID_URL seen on
@@ -357,3 +423,6 @@ tryUsePortal()
   NPCs with known scripts (taxis, Spinel) show specific options. NPCs with unknown scripts
   show flavor text + travel options to all major towns. NPCs without scripts show flavor text.
   Cursor changes to pointer on NPC hover. Option highlight on hover with gold color.
+- **Minimap**: collapsible panel showing map image with player (blue dot), portal (yellow dots),
+  mob (red dots), NPC (green dots), reactor (purple dots) markers. Toggle via settings.
+  Click +/− to collapse/expand. World-to-minimap coordinate transform using map center offset and scale.

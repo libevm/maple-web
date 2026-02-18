@@ -218,19 +218,48 @@ C++ formula: `speed = (info.speed + 100) * 0.001`
 ### Mob AI (Behavior State Machine)
 
 ```
-States: "stand" | "move"
+States: "stand" | "move" | "hit" (stagger) | "aggro" (chase) | "die" | "dead"
 Timers: MOB_STAND_MIN/MAX_MS (1500–4000), MOB_MOVE_MIN/MAX_MS (2000–5000)
 
-On timer expiry:
-  stand → move: pick random facing, set hforce
-  move → stand: stop force
+Patrol (normal behavior):
+  On timer expiry:
+    stand → move: pick random facing, set hforce
+    move → stand: stop force
+  During "move":
+    phobj.hforce = facing * mobSpeed
+    Patrol bounds (rx0/rx1): reverse on boundary hit
 
-During "move":
-  phobj.hforce = facing * mobSpeed
-  Patrol bounds (rx0/rx1): reverse on boundary hit
+Combat state machine (triggered by player attack):
+  1. HIT (stagger): mob freezes in hit1 animation for MOB_HIT_DURATION_MS (500ms)
+     - Knockback: linear velocity decay (MOB_KB_SPEED=150 px/sec → 0)
+     - Direction: away from player
+     - Physics bypassed — direct velocity assignment
+  2. AGGRO (chase): lasts MOB_AGGRO_DURATION_MS (4000ms) after stagger ends
+     - Mob chases player, orbits within ±60px
+     - Uses mob speed for hforce toward player
+     - Reverses when overshooting player position
+  3. Return to PATROL: after aggro timer expires
+
+Death:
+  - die1 stance plays, mob fades out over 800ms
+  - Marked dead, respawns after MOB_RESPAWN_DELAY_MS (8000ms)
+  - Respawn restores full HP and original spawn position
 
 TURNATEDGES:
   When edge collision clears the flag → AI reverses facing, re-sets flag
+```
+
+### Combat Constants
+```js
+ATTACK_COOLDOWN_MS = 600           // player attack cooldown
+ATTACK_RANGE_X = 120               // horizontal attack range
+ATTACK_RANGE_Y = 50                // vertical attack range
+MOB_HIT_DURATION_MS = 500          // stagger freeze duration
+MOB_AGGRO_DURATION_MS = 4000       // chase duration after stagger
+MOB_KB_SPEED = 150                 // initial knockback speed (px/sec)
+MOB_RESPAWN_DELAY_MS = 8000        // respawn timer after death
+MOB_HP_BAR_WIDTH = 60              // HP bar pixel width
+MOB_HP_BAR_HEIGHT = 5              // HP bar pixel height
 ```
 
 ### Mob/NPC Spawn
