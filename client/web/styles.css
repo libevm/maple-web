@@ -185,6 +185,57 @@ body:has(.canvas-wrapper.fixed-res) {
   font-size: 12px;
 }
 
+/* ── Key bindings configurator ── */
+.settings-keybinds {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.keybind-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.keybind-label {
+  font-size: 13px;
+  color: #e2e8f0;
+  min-width: 80px;
+}
+
+.keybind-btn {
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #475569;
+  border-radius: 4px;
+  padding: 4px 14px;
+  font-size: 13px;
+  font-family: monospace;
+  min-width: 80px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.keybind-btn:hover {
+  border-color: #3b82f6;
+  background: #1e3a5f;
+}
+
+.keybind-btn.listening {
+  border-color: #fbbf24;
+  background: #422006;
+  color: #fbbf24;
+  animation: keybind-pulse 0.8s infinite;
+}
+
+@keyframes keybind-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 /* ── Hamburger toggle button ── */
 .debug-toggle {
   position: absolute;

@@ -182,6 +182,11 @@ const runtime = {
       speed: PHYS_DEFAULT_SPEED_STAT,
       jump: PHYS_DEFAULT_JUMP_STAT,
     },
+    attacking: false,
+    attackStance: "",
+    attackFrameIndex: 0,
+    attackFrameTimer: 0,
+    attackCooldownUntil: 0,
     name: "MapleWeb",
     level: 1,
     job: "Beginner",
@@ -226,6 +231,12 @@ const runtime = {
     sfxEnabled: true,
     fixedRes: true,
     minimapVisible: true,
+  },
+  keybinds: {
+    attack: "KeyC",
+    jump: "Space",
+    pickup: "KeyZ",
+    npcChat: "KeyX", // placeholder for future
   },
   mouseWorld: { x: 0, y: 0 },
   characterData: null,
@@ -1249,11 +1260,16 @@ async function loadLifeAnimation(type, id) {
         }
       } catch (_) {}
 
-      // Extract mob speed from info
+      // Extract mob stats from info
       let speed = -100; // default: stationary
+      let level = 1, wdef = 0, avoid = 0, knockback = 1;
       if (type === "m" && infoNode) {
         const infoRec = imgdirLeafRecord(infoNode);
         speed = safeNumber(infoRec.speed, -100);
+        level = safeNumber(infoRec.level, 1);
+        wdef = safeNumber(infoRec.PDDamage, 0);
+        avoid = safeNumber(infoRec.eva, 0);
+        knockback = safeNumber(infoRec.pushed, 1);
       }
 
       // Extract NPC script ID from info/script
@@ -1274,7 +1290,7 @@ async function loadLifeAnimation(type, id) {
         }
       }
 
-      const result = { stances, name, speed, func, dialogue, scriptId };
+      const result = { stances, name, speed, func, dialogue, scriptId, level, wdef, avoid, knockback };
       lifeAnimations.set(cacheKey, result);
       return result;
     } catch (_) {
@@ -1314,11 +1330,27 @@ const MOB_HP_SHOW_MS = 3000;
 const DMG_NUMBER_RISE_SPEED = 80;  // px/sec
 const DMG_NUMBER_LIFETIME_MS = 1200;
 const DMG_NUMBER_FADE_START = 0.6; // fraction of lifetime before fade begins
-const PLAYER_BASE_DAMAGE_MIN = 8;
-const PLAYER_BASE_DAMAGE_MAX = 18;
-const ATTACK_COOLDOWN_MS = 350;
+const ATTACK_COOLDOWN_MS = 600;    // minimum time between attacks
+const MOB_KNOCKBACK_PX = 30;       // pixels mob is pushed back on hit
 
-let lastAttackTime = 0;
+// C++ damage formula constants
+// Weapon multiplier for 1H Sword (from C++ get_multiplier)
+const WEAPON_MULTIPLIER = 4.0;
+// Default mastery for beginner
+const DEFAULT_MASTERY = 0.2;
+// Default critical rate
+const DEFAULT_CRITICAL = 0.05;
+// Default accuracy
+const DEFAULT_ACCURACY = 10;
+// Default attack stat (watk from weapon + base)
+const DEFAULT_WATK = 15;
+// Close-range attack reach: C++ uses afterimage range, we simplify to px rect
+const ATTACK_RANGE_X = 120;
+const ATTACK_RANGE_Y = 50;
+
+// 1H Sword attack stances (from C++ S1A1M1D attack_stances)
+const SWORD_1H_ATTACK_STANCES = ["stabO1", "stabO2", "swingO1", "swingO2", "swingO3"];
+
 const damageNumbers = []; // { x, y, value, critical, elapsed, lifetime }
 
 // NPC interaction — click any visible NPC to open dialogue (no range limit)
@@ -1974,84 +2006,196 @@ function drawDamageNumbers() {
 
 // ─── Mob Combat (client-side demo) ───────────────────────────────────────────
 
-function findMobAtScreen(screenClickX, screenClickY) {
-  if (!runtime.map) return null;
+/**
+ * C++ damage formula (from CharStats::close_totalstats + Mob::calculate_damage).
+ *
+ * Player stat derivation:
+ *   primary    = get_multiplier() * STR   (for 1H sword: 4.0 × STR)
+ *   secondary  = DEX
+ *   multiplier = damagepercent + watk/100
+ *   maxdamage  = (primary + secondary) * multiplier
+ *   mindamage  = ((primary * 0.9 * mastery) + secondary) * multiplier
+ *
+ * Mob damage reduction (Mob::calculate_mindamage / calculate_maxdamage):
+ *   leveldelta = max(0, mobLevel - playerLevel)
+ *   maxdmg_vs_mob = playerMaxDmg * (1 - 0.01 * leveldelta) - mobWdef * 0.5
+ *   mindmg_vs_mob = playerMinDmg * (1 - 0.01 * leveldelta) - mobWdef * 0.6
+ *
+ * Hit chance (Mob::calculate_hitchance):
+ *   hitchance = accuracy / ((1.84 + 0.07 * leveldelta) * mobAvoid + 1.0)
+ *
+ * Critical: random < critical → damage *= 1.5
+ */
+function calculatePlayerDamageRange() {
+  const p = runtime.player;
+  // Beginner stats: STR≈4+level, DEX≈4
+  const str = 4 + p.level;
+  const dex = 4;
+  const primary = WEAPON_MULTIPLIER * str;
+  const secondary = dex;
+  const multiplier = DEFAULT_WATK / 100;
+  const maxdamage = (primary + secondary) * multiplier;
+  const mindamage = ((primary * 0.9 * DEFAULT_MASTERY) + secondary) * multiplier;
+  return { mindamage: Math.max(1, mindamage), maxdamage: Math.max(1, maxdamage) };
+}
 
-  const cam = runtime.camera;
-  const halfW = canvasEl.width / 2;
-  const halfH = canvasEl.height / 2;
+/**
+ * Apply C++ Mob::calculate_damage reduction.
+ * @param {number} playerMin - player mindamage
+ * @param {number} playerMax - player maxdamage
+ * @param {number} mobLevel - mob level from WZ (default 1)
+ * @param {number} mobWdef - mob PDDamage from WZ (default 0)
+ * @param {number} mobAvoid - mob eva from WZ (default 0)
+ * @returns {{ damage: number, critical: boolean, miss: boolean }}
+ */
+function calculateMobDamage(playerMin, playerMax, mobLevel, mobWdef, mobAvoid) {
+  const playerLevel = runtime.player.level;
+  let leveldelta = mobLevel - playerLevel;
+  if (leveldelta < 0) leveldelta = 0;
 
-  const entries = [...lifeRuntimeState.entries()].reverse();
-  for (const [idx, state] of entries) {
+  // Hit chance
+  const hitchance = DEFAULT_ACCURACY / ((1.84 + 0.07 * leveldelta) * mobAvoid + 1.0);
+  if (Math.random() > Math.max(0.01, hitchance)) {
+    return { damage: 0, critical: false, miss: true };
+  }
+
+  // Damage range after mob defense
+  const maxdmg = Math.max(1, playerMax * (1 - 0.01 * leveldelta) - mobWdef * 0.5);
+  const mindmg = Math.max(1, playerMin * (1 - 0.01 * leveldelta) - mobWdef * 0.6);
+
+  let damage = mindmg + Math.random() * (maxdmg - mindmg);
+  const critical = Math.random() < DEFAULT_CRITICAL;
+  if (critical) damage *= 1.5;
+  damage = Math.max(1, Math.min(999999, Math.floor(damage)));
+
+  return { damage, critical, miss: false };
+}
+
+/**
+ * Find closest alive mobs within attack range of player.
+ * C++ approach: rectangle range from player position, sorted by distance.
+ * For regular attack, mobcount = 1.
+ */
+function findMobsInRange(mobcount) {
+  if (!runtime.map) return [];
+
+  const px = runtime.player.x;
+  const py = runtime.player.y;
+  const facingLeft = runtime.player.facing === -1;
+
+  // Attack rectangle in world space (C++ range logic from Combat::apply_move)
+  const rangeLeft  = facingLeft ? px - ATTACK_RANGE_X : px - 10;
+  const rangeRight = facingLeft ? px + 10 : px + ATTACK_RANGE_X;
+  const rangeTop   = py - ATTACK_RANGE_Y;
+  const rangeBottom = py + ATTACK_RANGE_Y;
+
+  const candidates = [];
+
+  for (const [idx, state] of lifeRuntimeState) {
     const life = runtime.map.lifeEntries[idx];
     if (life.type !== "m") continue;
     if (state.dead || state.dying) continue;
 
-    const cacheKey = `m:${life.id}`;
-    const anim = lifeAnimations.get(cacheKey);
-    if (!anim) continue;
+    const mx = state.phobj ? state.phobj.x : life.x;
+    const my = state.phobj ? state.phobj.y : life.cy;
 
-    const stance = anim.stances[state.stance] ?? anim.stances["stand"];
-    if (!stance || stance.frames.length === 0) continue;
-
-    const frame = stance.frames[state.frameIndex % stance.frames.length];
-    const img = getImageByKey(frame.key);
-    if (!img) continue;
-
-    const worldX = state.phobj ? state.phobj.x : life.x;
-    const worldY = state.phobj ? state.phobj.y : life.cy;
-    const screenX = Math.round(worldX - cam.x + halfW);
-    const screenY = Math.round(worldY - cam.y + halfH);
-
-    const flip = state.canMove ? state.facing === 1 : life.f === 1;
-    const drawX = flip ? screenX - (img.width - frame.originX) : screenX - frame.originX;
-    const drawY = screenY - frame.originY;
-
-    const pad = 8;
-    if (
-      screenClickX >= drawX - pad &&
-      screenClickX <= drawX + img.width + pad &&
-      screenClickY >= drawY - pad &&
-      screenClickY <= drawY + img.height + pad
-    ) {
-      return { idx, life, anim, state };
+    if (mx >= rangeLeft && mx <= rangeRight && my >= rangeTop && my <= rangeBottom) {
+      const dist = Math.abs(mx - px) + Math.abs(my - py);
+      const cacheKey = `m:${life.id}`;
+      const anim = lifeAnimations.get(cacheKey);
+      candidates.push({ idx, life, anim, state, dist });
     }
   }
 
-  return null;
+  candidates.sort((a, b) => a.dist - b.dist);
+  return candidates.slice(0, mobcount);
 }
 
-function attackMob(mobResult) {
+/**
+ * Perform a regular attack (triggered by attack key).
+ * 1. Check can_attack conditions (C++ Player::can_attack)
+ * 2. Pick a random attack stance and start it on the character
+ * 3. Find closest mob in range
+ * 4. Calculate damage using C++ formula
+ * 5. Apply damage, knockback, effects
+ */
+function performAttack() {
+  const player = runtime.player;
   const now = performance.now();
-  if (now - lastAttackTime < ATTACK_COOLDOWN_MS) return;
-  lastAttackTime = now;
 
-  const state = mobResult.state;
-  if (state.dead || state.dying) return;
+  // C++ can_attack: not already attacking, not climbing, not sitting
+  if (player.attacking) return;
+  if (player.climbing) return;
+  if (now < player.attackCooldownUntil) return;
+  if (!player.onGround) return;
 
-  // Calculate damage
-  const isCritical = Math.random() < 0.15;
-  const baseDmg = PLAYER_BASE_DAMAGE_MIN + Math.floor(Math.random() * (PLAYER_BASE_DAMAGE_MAX - PLAYER_BASE_DAMAGE_MIN + 1));
-  const damage = isCritical ? Math.floor(baseDmg * 1.5) : baseDmg;
+  // Start attack animation
+  player.attacking = true;
+  const stanceIdx = Math.floor(Math.random() * SWORD_1H_ATTACK_STANCES.length);
+  player.attackStance = SWORD_1H_ATTACK_STANCES[stanceIdx];
+  player.attackFrameIndex = 0;
+  player.attackFrameTimer = 0;
+  player.attackCooldownUntil = now + ATTACK_COOLDOWN_MS;
 
-  state.hp -= damage;
-  state.hpShowUntil = now + MOB_HP_SHOW_MS;
+  // Find closest mob in range (mobcount=1 for regular attack)
+  const targets = findMobsInRange(1);
 
-  // Spawn damage number
-  const worldX = state.phobj ? state.phobj.x : mobResult.life.x;
-  const worldY = state.phobj ? state.phobj.y : mobResult.life.cy;
-  spawnDamageNumber(worldX, worldY, damage, isCritical);
+  if (targets.length > 0) {
+    const target = targets[0];
+    applyAttackToMob(target);
+  }
+}
+
+/**
+ * Apply damage to a mob target. Implements C++ Mob::calculate_damage + apply_damage.
+ */
+function applyAttackToMob(target) {
+  const now = performance.now();
+  const state = target.state;
+  const anim = target.anim;
+  const life = target.life;
+
+  // Get mob stats from WZ (loaded in lifeAnimations)
+  const mobLevel = anim?.level ?? 1;
+  const mobWdef = anim?.wdef ?? 0;
+  const mobAvoid = anim?.avoid ?? 0;
+  const mobKnockback = anim?.knockback ?? 1;
+
+  // Calculate damage using C++ formula
+  const { mindamage, maxdamage } = calculatePlayerDamageRange();
+  const result = calculateMobDamage(mindamage, maxdamage, mobLevel, mobWdef, mobAvoid);
+
+  // Spawn damage number (even for miss)
+  const worldX = state.phobj ? state.phobj.x : life.x;
+  const worldY = state.phobj ? state.phobj.y : life.cy;
+
+  if (result.miss) {
+    spawnDamageNumber(worldX, worldY, 0, false);
+  } else {
+    state.hp -= result.damage;
+    state.hpShowUntil = now + MOB_HP_SHOW_MS;
+    spawnDamageNumber(worldX, worldY, result.damage, result.critical);
+  }
 
   // Play hit sound
-  void playSfx("Mob.img", `${mobResult.life.id.replace(/^0+/, "").padStart(7, "0")}/Damage`);
+  void playSfx("Mob.img", `${life.id.replace(/^0+/, "").padStart(7, "0")}/Damage`);
 
-  // Hit stagger — briefly switch to hit1 stance
-  const anim = mobResult.anim;
-  if (anim.stances["hit1"] && !state.dying) {
-    state.stance = "hit1";
-    state.frameIndex = 0;
-    state.frameTimerMs = 0;
-    // Return to stand after a short delay (handled in updateLifeAnimations)
+  // C++ Mob::apply_damage: knockback when damage >= mob.knockback
+  if (!result.miss && result.damage >= mobKnockback && !state.dying) {
+    // Hit stagger — switch to hit1 stance
+    if (anim?.stances?.["hit1"]) {
+      state.stance = "hit1";
+      state.frameIndex = 0;
+      state.frameTimerMs = 0;
+    }
+
+    // Knockback: push mob away from player
+    const pushDir = runtime.player.facing; // facing direction = attack direction
+    if (state.phobj) {
+      state.phobj.x += pushDir * MOB_KNOCKBACK_PX;
+    }
+    // C++ sets counter=170 and flips mob to face the attacker
+    state.facing = -pushDir;
   }
 
   // Check for death
@@ -2059,17 +2203,15 @@ function attackMob(mobResult) {
     state.hp = 0;
     state.dying = true;
     state.dyingElapsed = 0;
-    if (anim.stances["die1"]) {
+    if (anim?.stances?.["die1"]) {
       state.stance = "die1";
       state.frameIndex = 0;
       state.frameTimerMs = 0;
     }
-    // Play death sound
-    void playSfx("Mob.img", `${mobResult.life.id.replace(/^0+/, "").padStart(7, "0")}/Die`);
+    void playSfx("Mob.img", `${life.id.replace(/^0+/, "").padStart(7, "0")}/Die`);
     // Award EXP
     runtime.player.exp += 3 + Math.floor(Math.random() * 5);
     if (runtime.player.exp >= runtime.player.maxExp) {
-      // Level up!
       runtime.player.level += 1;
       runtime.player.exp -= runtime.player.maxExp;
       runtime.player.maxExp = Math.floor(runtime.player.maxExp * 1.5) + 5;
@@ -2078,6 +2220,39 @@ function attackMob(mobResult) {
       runtime.player.maxMp += 4 + Math.floor(Math.random() * 3);
       runtime.player.mp = runtime.player.maxMp;
       rlog(`LEVEL UP! Now level ${runtime.player.level}`);
+    }
+  }
+}
+
+/**
+ * Update player attack animation state. Called each frame.
+ * When the attack animation completes, reset attacking flag.
+ */
+function updatePlayerAttack(dt) {
+  const player = runtime.player;
+  if (!player.attacking) return;
+
+  const frames = getCharacterActionFrames(player.attackStance);
+  if (frames.length === 0) {
+    // Stance not found in body data — end immediately
+    player.attacking = false;
+    return;
+  }
+
+  const frameNode = frames[player.attackFrameIndex % frames.length];
+  const leafRec = imgdirLeafRecord(frameNode);
+  const delayMs = safeNumber(leafRec.delay, 120);
+
+  player.attackFrameTimer += dt * 1000;
+  if (player.attackFrameTimer >= delayMs) {
+    player.attackFrameTimer -= delayMs;
+    player.attackFrameIndex += 1;
+
+    // Attack animation done when all frames played once (no looping)
+    if (player.attackFrameIndex >= frames.length) {
+      player.attacking = false;
+      player.attackFrameIndex = 0;
+      player.attackFrameTimer = 0;
     }
   }
 }
@@ -2094,7 +2269,6 @@ function updateMobCombatStates(dtMs) {
       const anim = lifeAnimations.get(`m:${life.id}`);
       const hitStance = anim?.stances["hit1"];
       if (hitStance) {
-        const frame = hitStance.frames[state.frameIndex % hitStance.frames.length];
         if (state.frameIndex >= hitStance.frames.length - 1) {
           state.stance = "stand";
           state.frameIndex = 0;
@@ -2110,7 +2284,6 @@ function updateMobCombatStates(dtMs) {
       state.dyingElapsed = (state.dyingElapsed ?? 0) + dtMs;
       const anim = lifeAnimations.get(`m:${life.id}`);
       const dieStance = anim?.stances["die1"];
-      // Wait for die animation to finish + fade
       const dieAnimDone = !dieStance || state.frameIndex >= dieStance.frames.length - 1;
       if (state.dyingElapsed > 800 && dieAnimDone) {
         state.dead = true;
@@ -2129,7 +2302,6 @@ function updateMobCombatStates(dtMs) {
       state.frameTimerMs = 0;
       state.behaviorState = "stand";
       state.behaviorTimerMs = randomRange(MOB_STAND_MIN_MS, MOB_STAND_MAX_MS);
-      // Reset position to spawn
       state.phobj.x = life.x;
       state.phobj.y = life.cy;
       state.respawnAt = 0;
@@ -4017,7 +4189,8 @@ function buildMapAssetPreloadTasks(map) {
 }
 
 function addCharacterPreloadTasks(taskMap) {
-  const actions = ["stand1", "walk1", "jump", "ladder", "rope", "prone", "sit"];
+  const actions = ["stand1", "walk1", "jump", "ladder", "rope", "prone", "sit",
+    ...SWORD_1H_ATTACK_STANCES];
 
   for (const action of actions) {
     const actionFrames = getCharacterActionFrames(action);
@@ -4773,35 +4946,51 @@ function updatePlayer(dt) {
     climbAction = "rope";
   }
 
-  const nextAction = player.climbing
-    ? climbAction
-    : crouchActive
-      ? crouchAction
-      : player.swimming
-        ? "fly"
-        : !player.onGround
-          ? "jump"
-          : player.onGround && Math.abs(player.vx) > 5
-            ? "walk1"
-            : "stand1";
+  // Update attack animation (handles its own timer + termination)
+  updatePlayerAttack(dt);
 
-  if (nextAction !== player.action) {
-    player.action = nextAction;
-    player.frameIndex = 0;
-    player.frameTimer = 0;
+  // Attack stance overrides normal action while attacking
+  if (player.attacking && player.attackStance) {
+    const attackAction = player.attackStance;
+    if (player.action !== attackAction) {
+      player.action = attackAction;
+      // attackFrameIndex/Timer managed by updatePlayerAttack
+    }
+    // Use attack frame indices for rendering
+    player.frameIndex = player.attackFrameIndex;
+  } else {
+    const nextAction = player.climbing
+      ? climbAction
+      : crouchActive
+        ? crouchAction
+        : player.swimming
+          ? "fly"
+          : !player.onGround
+            ? "jump"
+            : player.onGround && Math.abs(player.vx) > 5
+              ? "walk1"
+              : "stand1";
+
+    if (nextAction !== player.action) {
+      player.action = nextAction;
+      player.frameIndex = 0;
+      player.frameTimer = 0;
+    }
   }
 
-  const frameData = getCharacterFrameData(player.action, player.frameIndex);
-  const delayMs = frameData?.delay ?? 180;
-  const freezeClimbFrame = player.climbing && climbDir === 0;
+  if (!player.attacking) {
+    const frameData = getCharacterFrameData(player.action, player.frameIndex);
+    const delayMs = frameData?.delay ?? 180;
+    const freezeClimbFrame = player.climbing && climbDir === 0;
 
-  if (!freezeClimbFrame) {
-    player.frameTimer += dt * 1000;
-    if (player.frameTimer >= delayMs) {
-      player.frameTimer = 0;
-      const frames = getCharacterActionFrames(player.action);
-      if (frames.length > 0) {
-        player.frameIndex = (player.frameIndex + 1) % frames.length;
+    if (!freezeClimbFrame) {
+      player.frameTimer += dt * 1000;
+      if (player.frameTimer >= delayMs) {
+        player.frameTimer = 0;
+        const frames = getCharacterActionFrames(player.action);
+        if (frames.length > 0) {
+          player.frameIndex = (player.frameIndex + 1) % frames.length;
+        }
       }
     }
   }
@@ -6322,7 +6511,8 @@ async function loadMap(mapId, spawnPortalName = null, spawnFromPortalTransfer = 
 }
 
 function bindInput() {
-  const gameplayKeys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "KeyA", "KeyD", "KeyW", "KeyS"];
+  const gameplayKeys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "KeyA", "KeyD", "KeyW", "KeyS",
+    "KeyC", "KeyZ", "KeyX"]; // attack, pickup, npc (configurable)
 
   function setInputEnabled(enabled) {
     runtime.input.enabled = enabled;
@@ -6351,9 +6541,8 @@ function bindInput() {
       runtime.npcDialogue.hoveredOption = foundOption;
       canvasEl.style.cursor = foundOption >= 0 ? "pointer" : "";
     } else if (!runtime.loading.active && !runtime.portalWarpInProgress && runtime.map) {
-      const mob = findMobAtScreen(screenX, screenY);
-      const npc = mob ? null : findNpcAtScreen(screenX, screenY);
-      canvasEl.style.cursor = (mob || npc) ? "pointer" : "";
+      const npc = findNpcAtScreen(screenX, screenY);
+      canvasEl.style.cursor = npc ? "pointer" : "";
     } else {
       canvasEl.style.cursor = "";
     }
@@ -6402,24 +6591,21 @@ function bindInput() {
       }
     }
 
-    // Check mob/NPC click (only when not loading/transitioning)
+    // Check NPC click (only when not loading/transitioning)
     if (!runtime.loading.active && !runtime.portalWarpInProgress && runtime.map) {
-      // Try mob attack first
-      const mob = findMobAtScreen(cx, cy);
-      if (mob) {
-        attackMob(mob);
+      const npc = findNpcAtScreen(cx, cy);
+      if (npc) {
+        openNpcDialogue(npc);
       } else {
-        const npc = findNpcAtScreen(cx, cy);
-        if (npc) {
-          openNpcDialogue(npc);
-        } else {
-          rlog(`click at screen(${Math.round(cx)},${Math.round(cy)}) world(${Math.round(runtime.mouseWorld.x)},${Math.round(runtime.mouseWorld.y)}) — no hit`);
-        }
+        rlog(`click at screen(${Math.round(cx)},${Math.round(cy)}) world(${Math.round(runtime.mouseWorld.x)},${Math.round(runtime.mouseWorld.y)}) — no hit`);
       }
     }
   });
 
   window.addEventListener("keydown", (event) => {
+    // Keybind configurator intercepts when listening
+    if (activeKeybindBtn && handleKeybindKey(event)) return;
+
     if (event.code === "Enter") {
       if (runtime.npcDialogue.active) {
         event.preventDefault();
@@ -6495,11 +6681,18 @@ function bindInput() {
     }
     if (event.code === "ArrowDown" || event.code === "KeyS") runtime.input.down = true;
 
-    if (event.code === "Space") {
+    // Jump key (configurable, default Space)
+    if (event.code === runtime.keybinds.jump || event.code === "Space") {
       if (!runtime.input.jumpHeld) {
         runtime.input.jumpQueued = true;
       }
       runtime.input.jumpHeld = true;
+    }
+
+    // Attack key (configurable, default C)
+    if (event.code === runtime.keybinds.attack) {
+      event.preventDefault();
+      performAttack();
     }
   });
 
@@ -6520,7 +6713,7 @@ function bindInput() {
     if (event.code === "ArrowUp" || event.code === "KeyW") runtime.input.up = false;
     if (event.code === "ArrowDown" || event.code === "KeyS") runtime.input.down = false;
 
-    if (event.code === "Space") {
+    if (event.code === runtime.keybinds.jump || event.code === "Space") {
       runtime.input.jumpHeld = false;
     }
   });
@@ -6644,11 +6837,102 @@ settingsMinimapToggleEl?.addEventListener("change", () => {
   saveSettings();
 });
 
+// ─── Key Bindings Configurator ──────────────────────────────────────────────
+
+const KEYBINDS_STORAGE_KEY = "mapleweb.keybinds.v1";
+
+/** Convert event.code to display name */
+function keyCodeToDisplay(code) {
+  if (code === "Space") return "Space";
+  if (code.startsWith("Key")) return code.slice(3);
+  if (code.startsWith("Digit")) return code.slice(5);
+  if (code.startsWith("Arrow")) return "↑↓←→"["UpDownLeftRight".indexOf(code.slice(5)) / (code.slice(5).length)] || code.slice(5);
+  return code.replace(/([A-Z])/g, " $1").trim();
+}
+
+function loadKeybinds() {
+  try {
+    const raw = localStorage.getItem(KEYBINDS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      for (const key of Object.keys(runtime.keybinds)) {
+        if (typeof parsed[key] === "string") runtime.keybinds[key] = parsed[key];
+      }
+    }
+  } catch (_) {}
+}
+
+function saveKeybinds() {
+  try {
+    localStorage.setItem(KEYBINDS_STORAGE_KEY, JSON.stringify(runtime.keybinds));
+  } catch (_) {}
+}
+
+function syncKeybindButtons() {
+  for (const btn of document.querySelectorAll(".keybind-btn")) {
+    const action = btn.dataset.action;
+    if (action && runtime.keybinds[action]) {
+      btn.textContent = keyCodeToDisplay(runtime.keybinds[action]);
+    }
+  }
+}
+
+let activeKeybindBtn = null;
+
+function startKeybindListening(btn) {
+  if (activeKeybindBtn) {
+    activeKeybindBtn.classList.remove("listening");
+    activeKeybindBtn.textContent = keyCodeToDisplay(runtime.keybinds[activeKeybindBtn.dataset.action]);
+  }
+  activeKeybindBtn = btn;
+  btn.classList.add("listening");
+  btn.textContent = "Press key…";
+}
+
+function handleKeybindKey(event) {
+  if (!activeKeybindBtn) return false;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  const code = event.code;
+  // Don't allow Escape (reserved) or Enter (reserved for chat)
+  if (code === "Escape") {
+    activeKeybindBtn.classList.remove("listening");
+    activeKeybindBtn.textContent = keyCodeToDisplay(runtime.keybinds[activeKeybindBtn.dataset.action]);
+    activeKeybindBtn = null;
+    return true;
+  }
+  if (code === "Enter") return true;
+
+  const action = activeKeybindBtn.dataset.action;
+  runtime.keybinds[action] = code;
+  saveKeybinds();
+
+  activeKeybindBtn.classList.remove("listening");
+  activeKeybindBtn.textContent = keyCodeToDisplay(code);
+  activeKeybindBtn = null;
+  return true;
+}
+
+// Attach click listeners to keybind buttons
+for (const btn of document.querySelectorAll(".keybind-btn")) {
+  btn.addEventListener("click", () => startKeybindListening(btn));
+}
+
+loadKeybinds();
+syncKeybindButtons();
+
 // Close settings on click outside modal content
 settingsModalEl?.addEventListener("click", (e) => {
   if (e.target === settingsModalEl) {
     settingsModalEl.classList.add("hidden");
     canvasEl.focus();
+    if (activeKeybindBtn) {
+      activeKeybindBtn.classList.remove("listening");
+      activeKeybindBtn.textContent = keyCodeToDisplay(runtime.keybinds[activeKeybindBtn.dataset.action]);
+      activeKeybindBtn = null;
+    }
   }
 });
 
