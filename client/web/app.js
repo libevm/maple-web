@@ -1153,7 +1153,17 @@ async function loadLifeAnimation(type, id) {
 }
 
 // Per-life-entry runtime animation state
-const lifeRuntimeState = new Map(); // key: index in lifeEntries -> { stance, frameIndex, frameTimerMs }
+const lifeRuntimeState = new Map(); // key: index in lifeEntries -> { stance, frameIndex, frameTimerMs, ... }
+
+const MOB_PATROL_SPEED = 30; // pixels per second
+const MOB_STAND_MIN_MS = 1500;
+const MOB_STAND_MAX_MS = 4000;
+const MOB_MOVE_MIN_MS = 2000;
+const MOB_MOVE_MAX_MS = 5000;
+
+function randomRange(min, max) {
+  return min + Math.random() * (max - min);
+}
 
 function initLifeRuntimeStates() {
   lifeRuntimeState.clear();
@@ -1162,10 +1172,21 @@ function initLifeRuntimeStates() {
   for (let i = 0; i < runtime.map.lifeEntries.length; i++) {
     const life = runtime.map.lifeEntries[i];
     if (life.hide === 1) continue;
+
+    const isMob = life.type === "m";
+    const canPatrol = isMob && life.rx0 !== life.rx1 && life.rx0 !== 0 && life.rx1 !== 0;
+
     lifeRuntimeState.set(i, {
       stance: "stand",
       frameIndex: 0,
       frameTimerMs: 0,
+      // Mob patrol state
+      posX: life.x,
+      posY: life.cy,
+      facing: life.f === 1 ? 1 : -1,
+      patrolEnabled: canPatrol,
+      behaviorState: "stand", // "stand" or "move"
+      behaviorTimerMs: randomRange(MOB_STAND_MIN_MS, MOB_STAND_MAX_MS),
     });
   }
 }
@@ -1179,6 +1200,47 @@ function updateLifeAnimations(dtMs) {
     const anim = lifeAnimations.get(cacheKey);
     if (!anim) continue;
 
+    // Update mob patrol behavior
+    if (state.patrolEnabled) {
+      state.behaviorTimerMs -= dtMs;
+
+      if (state.behaviorTimerMs <= 0) {
+        // Switch behavior
+        if (state.behaviorState === "stand") {
+          state.behaviorState = "move";
+          state.behaviorTimerMs = randomRange(MOB_MOVE_MIN_MS, MOB_MOVE_MAX_MS);
+          // Pick a random direction
+          state.facing = Math.random() < 0.5 ? -1 : 1;
+        } else {
+          state.behaviorState = "stand";
+          state.behaviorTimerMs = randomRange(MOB_STAND_MIN_MS, MOB_STAND_MAX_MS);
+        }
+      }
+
+      if (state.behaviorState === "move") {
+        const dx = state.facing * MOB_PATROL_SPEED * (dtMs / 1000);
+        state.posX += dx;
+
+        // Bounce off patrol boundaries
+        if (state.posX < life.rx0) {
+          state.posX = life.rx0;
+          state.facing = 1;
+        } else if (state.posX > life.rx1) {
+          state.posX = life.rx1;
+          state.facing = -1;
+        }
+      }
+
+      // Set stance based on behavior
+      const desiredStance = state.behaviorState === "move" && anim.stances["move"] ? "move" : "stand";
+      if (state.stance !== desiredStance) {
+        state.stance = desiredStance;
+        state.frameIndex = 0;
+        state.frameTimerMs = 0;
+      }
+    }
+
+    // Update frame animation
     const stance = anim.stances[state.stance] ?? anim.stances["stand"];
     if (!stance || stance.frames.length === 0) continue;
 
@@ -1211,9 +1273,9 @@ function drawLifeSprites() {
     const img = getImageByKey(frame.key);
     if (!img) continue;
 
-    // World position — use cy (foot position) for y
-    const worldX = life.x;
-    const worldY = life.cy;
+    // World position — use patrol position for mobs, static for NPCs
+    const worldX = state.patrolEnabled ? state.posX : life.x;
+    const worldY = state.patrolEnabled ? state.posY : life.cy;
 
     // Screen position
     const screenX = Math.round(worldX - cam.x + halfW);
@@ -1230,8 +1292,8 @@ function drawLifeSprites() {
 
     ctx.save();
 
-    // Flip: f=1 means NOT flipped, f=0 or default means flipped (facing left by default)
-    const flip = life.f === 1;
+    // Facing: -1 = left (default sprite direction), 1 = right (flipped)
+    const flip = state.patrolEnabled ? state.facing === 1 : life.f === 1;
 
     if (flip) {
       ctx.translate(screenX, screenY);
@@ -3394,12 +3456,6 @@ function drawMapLayer(layer) {
 function currentPlayerRenderLayer() {
   if (!runtime.map) return safeNumber(runtime.player.footholdLayer, -1);
   if (runtime.player.climbing) return 7;
-
-  const below = findFootholdBelow(runtime.map, runtime.player.x, runtime.player.y);
-  if (below?.line && Number.isFinite(below.line.layer)) {
-    return below.line.layer;
-  }
-
   return safeNumber(runtime.player.footholdLayer, -1);
 }
 
