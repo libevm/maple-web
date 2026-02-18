@@ -106,8 +106,8 @@ const PORTAL_FADE_IN_MS = 240;
 const PORTAL_SCROLL_MIN_MS = 180;
 const PORTAL_SCROLL_MAX_MS = 560;
 const PORTAL_SCROLL_SPEED_PX_PER_SEC = 3200;
-const DEFAULT_CANVAS_WIDTH = 1440;
-const DEFAULT_CANVAS_HEIGHT = 1080;
+const DEFAULT_CANVAS_WIDTH = 800;
+const DEFAULT_CANVAS_HEIGHT = 600;
 const BG_REFERENCE_WIDTH = 800;
 const BG_REFERENCE_HEIGHT = 600;
 const MIN_CANVAS_WIDTH = 640;
@@ -132,8 +132,8 @@ const CHAT_BUBBLE_VERTICAL_PADDING = 6;
 const CHAT_BUBBLE_STANDARD_WIDTH_MULTIPLIER = 3;
 const TELEPORT_PRESET_CACHE_KEY = "mapleweb.debug.teleportPreset.v1";
 const SETTINGS_CACHE_KEY = "mapleweb.settings.v1";
-const FIXED_RES_WIDTH = 1440;
-const FIXED_RES_HEIGHT = 1080;
+const FIXED_RES_WIDTH = 800;
+const FIXED_RES_HEIGHT = 600;
 
 /**
  * Default equipment set for the character.
@@ -846,7 +846,7 @@ function applyFixedRes() {
     const vw = window.innerWidth || DEFAULT_CANVAS_WIDTH;
     const vh = window.innerHeight || DEFAULT_CANVAS_HEIGHT;
 
-    // Fit 4:3 (1440×1080) display within viewport (CSS display size)
+    // Fit 4:3 (800×600) display within viewport (CSS display size)
     let displayW, displayH;
     if (vw / vh > 4 / 3) {
       displayH = vh;
@@ -873,7 +873,7 @@ function syncCanvasResolution() {
     const vw = window.innerWidth || DEFAULT_CANVAS_WIDTH;
     const vh = window.innerHeight || DEFAULT_CANVAS_HEIGHT;
 
-    // If viewport >= fixed resolution, lock canvas buffer to 1440×1080
+    // If viewport >= fixed resolution, lock canvas buffer to 800×600
     // and let CSS scale the display. If smaller, use viewport size.
     if (vw >= FIXED_RES_WIDTH && vh >= FIXED_RES_HEIGHT) {
       nextWidth = FIXED_RES_WIDTH;
