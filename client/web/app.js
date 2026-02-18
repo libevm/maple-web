@@ -1337,8 +1337,9 @@ const ATTACK_COOLDOWN_MS = 600;    // minimum time between attacks
 // apply_damage sets counter=170, HIT exits at counter>200 → ~30 ticks of KB force
 const MOB_KB_FORCE_GROUND = 0.2;   // C++ KBFORCE when onground
 const MOB_KB_FORCE_AIR = 0.1;      // C++ KBFORCE when airborne
-const MOB_KB_COUNTER_START = 170;   // C++ apply_damage: counter = 170
+const MOB_KB_COUNTER_START = 138;   // counter start → exits at 200 = 62 ticks × 8ms ≈ 0.5s HIT
 const MOB_KB_COUNTER_EXIT = 200;    // C++ HIT: next = counter > 200
+const MOB_KB_IMPULSE = 3.0;         // immediate hspeed impulse on hit for visible pushback
 
 // C++ damage formula constants
 // Weapon multiplier for 1H Sword (from C++ get_multiplier)
@@ -2397,12 +2398,18 @@ function applyAttackToMob(target) {
     const attackerIsLeft = runtime.player.x < worldX;
     state.facing = attackerIsLeft ? -1 : 1;
 
-    // C++ counter = 170; set_stance(HIT)
+    // C++ counter = 170; set_stance(HIT) — reset counter + give immediate push
     state.hitCounter = MOB_KB_COUNTER_START;
     if (anim?.stances?.["hit1"]) {
       state.stance = "hit1";
       state.frameIndex = 0;
       state.frameTimerMs = 0;
+    }
+
+    // Immediate velocity impulse for visible pushback (away from attacker)
+    if (state.phobj) {
+      const pushDir = attackerIsLeft ? 1 : -1; // push away from attacker
+      state.phobj.hspeed = pushDir * MOB_KB_IMPULSE;
     }
   }
 
