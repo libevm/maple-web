@@ -5915,18 +5915,8 @@ function drawStatusBar() {
   ctx.fillStyle = "#334155";
   ctx.fillRect(0, barY, cw, 1);
 
-  // EXP bar — thin strip along very top edge
-  const expBarH = 3;
-  const expFrac = player.maxExp > 0 ? Math.min(1, player.exp / player.maxExp) : 0;
-  ctx.fillStyle = "#000000";
-  ctx.fillRect(0, barY + 1, cw, expBarH);
-  if (expFrac > 0) {
-    ctx.fillStyle = "#facc15";
-    ctx.fillRect(0, barY + 1, Math.round(cw * expFrac), expBarH);
-  }
-
   // Layout: [Level/Job] [HP bar ~~~~~~~~~~~~] [MP bar ~~~~~~~~~~~~]
-  const contentY = barY + expBarH + 4;
+  const contentY = barY + 4;
   const levelLabelW = 80;
 
   // Level + job
