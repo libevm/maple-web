@@ -857,11 +857,15 @@ function applyFixedRes() {
     }
     wrapper.style.setProperty("--fixed-w", displayW + "px");
     wrapper.style.setProperty("--fixed-h", displayH + "px");
+    // Scale status bar height from canvas pixels to CSS pixels
+    const statusBarCss = Math.round(STATUSBAR_HEIGHT / DEFAULT_CANVAS_HEIGHT * displayH);
+    wrapper.style.setProperty("--statusbar-h", statusBarCss + "px");
     wrapper.classList.add("fixed-res");
   } else {
     wrapper.classList.remove("fixed-res");
     wrapper.style.removeProperty("--fixed-w");
     wrapper.style.removeProperty("--fixed-h");
+    wrapper.style.setProperty("--statusbar-h", STATUSBAR_HEIGHT + "px");
   }
   syncCanvasResolution();
 }
@@ -1337,7 +1341,7 @@ const ATTACK_COOLDOWN_MS = 600;    // minimum time between attacks
 // Knockback / stagger constants
 const MOB_HIT_DURATION_MS = 500;   // pain animation duration (~0.5s)
 const MOB_AGGRO_DURATION_MS = 4000; // chase player after stagger (4s)
-const MOB_KB_SPEED = 350;         // initial knockback speed (px/sec), decays linearly to 0 over stagger
+const MOB_KB_SPEED = 150;         // initial knockback speed (px/sec), decays linearly to 0 over stagger
 
 // C++ damage formula constants
 // Weapon multiplier for 1H Sword (from C++ get_multiplier)

@@ -508,7 +508,7 @@ button {
 /* ── Chat bar (bottom text input) ── */
 .chat-bar {
   position: absolute;
-  bottom: 34px;
+  bottom: var(--statusbar-h, 34px);
   left: 0;
   right: 0;
   display: flex;
@@ -549,7 +549,7 @@ button {
 /* ── Chat log (history overlay) ── */
 .chat-log {
   position: absolute;
-  bottom: 72px;
+  bottom: calc(var(--statusbar-h, 34px) + 38px);
   left: 0;
   right: 0;
   height: 140px;
