@@ -1340,7 +1340,7 @@ const ATTACK_COOLDOWN_MS = 600;    // minimum time between attacks
 // apply_damage sets counter=170, HIT exits at counter>200 → ~30 ticks of KB force
 const MOB_KB_FORCE_GROUND = 0.2;   // C++ KBFORCE when onground
 const MOB_KB_FORCE_AIR = 0.1;      // C++ KBFORCE when airborne
-const MOB_KB_COUNTER_START = 170;   // C++ counter = 170 on hit
+const MOB_KB_COUNTER_START = 190;   // C++ counter = 170 on hit (raised for snappier feel)
 const MOB_KB_COUNTER_EXIT = 200;    // C++ exits HIT when counter > 200
 
 // C++ damage formula constants
