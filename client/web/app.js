@@ -1605,6 +1605,38 @@ function fhWall(map, fhId, goingLeft, fy) {
 }
 
 /**
+ * C++ Mob::next_move() — decides the mob's next action after a stance completes.
+ * HIT/STAND → MOVE (random direction)
+ * MOVE → 33% STAND, 33% MOVE left, 33% MOVE right
+ */
+function mobNextMove(state, anim) {
+  if (!state.canMove) {
+    state.behaviorState = "stand";
+    return;
+  }
+
+  const currentStance = state.stance;
+
+  if (currentStance === "hit1" || currentStance === "stand" || state.behaviorState === "stand") {
+    // C++ case HIT/STAND: set_stance(MOVE), flip = random
+    state.behaviorState = "move";
+    state.facing = Math.random() < 0.5 ? -1 : 1;
+  } else {
+    // C++ case MOVE/JUMP: random 3-way
+    const r = Math.floor(Math.random() * 3);
+    if (r === 0) {
+      state.behaviorState = "stand";
+    } else if (r === 1) {
+      state.behaviorState = "move";
+      state.facing = -1; // C++ flip = false → facing left
+    } else {
+      state.behaviorState = "move";
+      state.facing = 1;  // C++ flip = true → facing right
+    }
+  }
+}
+
+/**
  * Full physics step for a mob/NPC PhysicsObject.
  */
 function mobPhysicsStep(map, phobj, isSwimMap) {
@@ -1685,22 +1717,50 @@ function mobPhysicsStep(map, phobj, isSwimMap) {
     }
   }
 
-  // --- 4. Update foothold tracking when on ground ---
+  // --- 4. C++ update_fh: foothold tracking when on ground ---
   if (phobj.onGround) {
     const curFh = map.footholdById?.get(String(phobj.fhId));
     if (curFh) {
-      // Follow prev/next chain
-      if (phobj.x > fhRight(curFh) && curFh.nextId) {
-        const nxt = map.footholdById?.get(curFh.nextId);
-        if (nxt && !fhIsWall(nxt)) {
-          phobj.fhId = nxt.id;
-          phobj.fhSlope = fhSlope(nxt);
+      let newFhId = phobj.fhId;
+
+      // C++ update_fh: follow prev/next chain based on x position
+      if (phobj.x > fhRight(curFh)) {
+        newFhId = curFh.nextId || "0";
+      } else if (phobj.x < fhLeft(curFh)) {
+        newFhId = curFh.prevId || "0";
+      }
+
+      if (newFhId === "0" || !newFhId) {
+        // C++ update_fh: fhid became 0 → try get_fhid_below, else clamp back
+        // phobj.fhid = get_fhid_below(x, y); if still 0: phobj.fhid = curfh.id(); phobj.limitx(curfh.x1())
+        const below = fhIdBelow(map, phobj.x, phobj.y);
+        if (below) {
+          phobj.fhId = below.id;
+          phobj.fhSlope = fhSlope(below);
+        } else {
+          // Clamp back to current foothold edge (C++ limitx)
+          phobj.fhId = curFh.id;
+          if (phobj.x > fhRight(curFh)) {
+            phobj.x = fhRight(curFh);
+          } else {
+            phobj.x = fhLeft(curFh);
+          }
+          phobj.hspeed = 0;
         }
-      } else if (phobj.x < fhLeft(curFh) && curFh.prevId) {
-        const prv = map.footholdById?.get(curFh.prevId);
-        if (prv && !fhIsWall(prv)) {
-          phobj.fhId = prv.id;
-          phobj.fhSlope = fhSlope(prv);
+      } else {
+        const nxtFh = map.footholdById?.get(String(newFhId));
+        if (nxtFh && !fhIsWall(nxtFh)) {
+          phobj.fhId = nxtFh.id;
+          phobj.fhSlope = fhSlope(nxtFh);
+        } else {
+          // Next foothold is a wall or invalid → clamp
+          phobj.fhId = curFh.id;
+          if (phobj.x > fhRight(curFh)) {
+            phobj.x = fhRight(curFh);
+          } else {
+            phobj.x = fhLeft(curFh);
+          }
+          phobj.hspeed = 0;
         }
       }
     }
@@ -1804,9 +1864,7 @@ function initLifeRuntimeStates() {
       hp: isMob ? MOB_DEFAULT_HP : -1,
       maxHp: isMob ? MOB_DEFAULT_HP : -1,
       hpShowUntil: 0,
-      hitCounter: 0,       // C++ counter for HIT stance duration
-      aggro: false,         // C++ mode==2 → aggro; set after being hit
-      aggroTarget: null,    // { x, y } of player when aggro started
+      hitCounter: 0,       // C++ counter — controls stance transitions
       dying: false,
       dead: false,
       respawnAt: 0,
@@ -1827,143 +1885,84 @@ function updateLifeAnimations(dtMs) {
     if (!anim) continue;
 
     // --- Mob AI + physics ---
-    const inHitStance = state.stance === "hit1" && !state.dying;
-
-    if (inHitStance && state.canMove && state.phobj) {
-      // ── C++ Mob::update HIT stance: apply knockback force per tick ──
-      // case Stance::HIT:
-      //   double KBFORCE = phobj.onground ? 0.2 : 0.1;
-      //   phobj.hforce = flip ? -KBFORCE : KBFORCE;
-      // counter++ each tick, exits HIT when counter > 200
+    // ── C++ Mob::update — faithful port ──
+    // Skip update for dead/dying mobs (C++ dying branch just normalizes phobj)
+    if (state.dying || state.dead) {
+      // C++ dying: phobj.normalize(); physics.get_fht().update_fh(phobj);
+      if (state.phobj) { state.phobj.hspeed = 0; state.phobj.vspeed = 0; }
+    } else if (state.canMove && state.phobj) {
       const ph = state.phobj;
       const steps = Math.max(1, Math.round(dtMs / MOB_PHYS_TIMESTEP));
 
-      state.hitCounter += steps;
-
-      // C++ Mob::update: if TURNATEDGES cleared → flip, set flag, exit HIT
+      // ── C++ check TURNATEDGES flag (lines 193-199) ──
+      // If TURNATEDGES was cleared (by limit_movement edge collision),
+      // flip direction, re-set the flag, and if in HIT → go to STAND.
       if (!ph.turnAtEdges) {
         state.facing = -state.facing;
         ph.turnAtEdges = true;
-        // C++ sets STAND when hitting edge during HIT
-        state.stance = "stand";
-        state.frameIndex = 0;
-        state.frameTimerMs = 0;
-        state.hitCounter = 0;
-        ph.hspeed = 0;
-        // Transition to aggro chase
-        state.aggro = true;
-        state.behaviorState = "move";
-        state.behaviorTimerMs = randomRange(3000, 6000);
-      } else if (state.hitCounter > MOB_KB_COUNTER_EXIT) {
-        // C++ next_move() from HIT → MOVE (chase player)
-        state.stance = anim?.stances?.["move"] ? "move" : "stand";
-        state.frameIndex = 0;
-        state.frameTimerMs = 0;
-        state.hitCounter = 0;
-        ph.hspeed = 0;
-        ph.turnAtEdges = true;
-        // Set aggro — mob chases player after being hit
-        state.aggro = true;
-        state.behaviorState = "move";
-        state.behaviorTimerMs = randomRange(3000, 6000);
-        // Face toward player
-        const playerX = runtime.player.x;
-        state.facing = playerX < ph.x ? -1 : 1;
-      } else {
-        // Apply KB force each tick — direction is AWAY from attacker
-        // C++ flip=true means facing right, hforce = flip ? -KBFORCE : KBFORCE
-        // Mob faces attacker (set in apply_damage), KB pushes opposite direction
-        // Our facing: -1=left,1=right. facing=1 means facing right → push left.
-        const kbForce = ph.onGround ? MOB_KB_FORCE_GROUND : MOB_KB_FORCE_AIR;
-        // C++ hforce = flip ? -KBFORCE : KBFORCE (flip=facing right, push left)
-        ph.hforce = state.facing === 1 ? -kbForce : kbForce;
 
-        // Run through normal mobPhysicsStep — handles wall/edge limits, foothold tracking
-        for (let s = 0; s < steps; s++) {
-          mobPhysicsStep(map, ph, isSwimMap);
-        }
-      }
-    } else if (state.canMove && !state.dying && !state.dead && !inHitStance) {
-      const ph = state.phobj;
-
-      // ── Aggro chase: mob pursues player after being hit ──
-      if (state.aggro) {
-        state.behaviorTimerMs -= dtMs;
-
-        // Aggro expires → return to normal patrol
-        if (state.behaviorTimerMs <= 0) {
-          state.aggro = false;
-          state.behaviorState = "stand";
-          state.behaviorTimerMs = randomRange(MOB_STAND_MIN_MS, MOB_STAND_MAX_MS);
-        } else {
-          // Chase: face toward player and move
-          const playerX = runtime.player.x;
-          const dx = playerX - ph.x;
-          state.facing = dx < 0 ? -1 : 1;
-          state.behaviorState = "move";
-          ph.hforce = state.facing === 1 ? state.mobSpeed : -state.mobSpeed;
-        }
-      } else {
-        // ── Normal patrol AI ──
-        state.behaviorTimerMs -= dtMs;
-        state.behaviorCounter += dtMs;
-
-        if (state.behaviorTimerMs <= 0) {
-          if (state.behaviorState === "stand") {
-            state.behaviorState = "move";
-            state.behaviorTimerMs = randomRange(MOB_MOVE_MIN_MS, MOB_MOVE_MAX_MS);
-            state.facing = Math.random() < 0.5 ? -1 : 1;
-          } else {
-            state.behaviorState = "stand";
-            state.behaviorTimerMs = randomRange(MOB_STAND_MIN_MS, MOB_STAND_MAX_MS);
-          }
-          state.behaviorCounter = 0;
-          ph.turnAtEdges = true;
-        }
-
-        // Apply movement force (like C++ Mob::update switch on MOVE stance)
-        if (state.behaviorState === "move") {
-          ph.hforce = state.facing === 1 ? state.mobSpeed : -state.mobSpeed;
+        if (state.stance === "hit1") {
+          state.stance = "stand";
+          state.frameIndex = 0;
+          state.frameTimerMs = 0;
         }
       }
 
-      // Patrol bounds: reverse at limits (applies to both aggro and normal)
-      if (ph.x <= state.patrolMin && state.facing === -1) {
-        state.facing = 1;
-        ph.hforce = 0;
-        ph.hspeed = 0;
-        ph.turnAtEdges = true;
-      } else if (ph.x >= state.patrolMax && state.facing === 1) {
-        state.facing = -1;
-        ph.hforce = 0;
-        ph.hspeed = 0;
-        ph.turnAtEdges = true;
+      // ── C++ apply force based on current stance (lines 201-236) ──
+      if (state.stance === "move" || state.behaviorState === "move") {
+        // C++ case Stance::MOVE: phobj.hforce = flip ? speed : -speed;
+        ph.hforce = state.facing === 1 ? state.mobSpeed : -state.mobSpeed;
+      } else if (state.stance === "hit1") {
+        // C++ case Stance::HIT: KBFORCE = onground ? 0.2 : 0.1; hforce = flip ? -KBFORCE : KBFORCE
+        // C++ flip = true → mob faces right → KB pushes left (away from attacker)
+        if (state.canMove) {
+          const kbForce = ph.onGround ? MOB_KB_FORCE_GROUND : MOB_KB_FORCE_AIR;
+          ph.hforce = state.facing === 1 ? -kbForce : kbForce;
+        }
       }
+      // STAND: no force applied (C++ has no case for STAND)
 
-      // Run physics step(s) — step at C++ fixed rate
-      const steps = Math.max(1, Math.round(dtMs / MOB_PHYS_TIMESTEP));
+      // ── C++ physics.move_object(phobj) — update_fh + move_normal + limit_movement ──
       for (let s = 0; s < steps; s++) {
         mobPhysicsStep(map, ph, isSwimMap);
       }
 
-      // If turnAtEdges was cleared by collision, mob hit an edge → reverse
-      if (!ph.turnAtEdges) {
-        state.facing = -state.facing;
-        ph.turnAtEdges = true;
+      // ── C++ counter-based state transitions (lines 241-261) ──
+      // counter++ every tick. Check 'next' condition per stance.
+      state.hitCounter += steps;
+      let doNextMove = false;
+
+      if (state.stance === "hit1") {
+        // C++ case HIT: next = counter > 200
+        doNextMove = state.hitCounter > MOB_KB_COUNTER_EXIT;
+      } else {
+        // C++ default: next = aniend && counter > 200
+        // aniend approximation: check if current animation cycle completed
+        const curStanceAnim = anim?.stances?.[state.stance] ?? anim?.stances?.["stand"];
+        const aniEnd = curStanceAnim && state.frameIndex >= curStanceAnim.frames.length - 1;
+        doNextMove = aniEnd && state.hitCounter > 200;
       }
 
-      // Set stance
-      const moving = Math.abs(ph.hspeed) > 0.05 && state.behaviorState === "move";
-      const desiredStance = moving && anim.stances["move"] ? "move" : "stand";
-      if (state.stance !== desiredStance) {
-        state.stance = desiredStance;
-        state.frameIndex = 0;
-        state.frameTimerMs = 0;
+      if (doNextMove) {
+        // ── C++ next_move() (lines 274-316) ──
+        mobNextMove(state, anim);
+        state.hitCounter = 0;
       }
-    } else if (life.type === "m" || life.type === "n") {
+
+      // ── Sync visual stance with behavior ──
+      if (state.stance !== "hit1") {
+        const moving = state.behaviorState === "move" && Math.abs(ph.hspeed) > 0.05;
+        const desiredStance = moving && anim?.stances?.["move"] ? "move" : "stand";
+        if (state.stance !== desiredStance) {
+          state.stance = desiredStance;
+          state.frameIndex = 0;
+          state.frameTimerMs = 0;
+        }
+      }
+    } else if ((life.type === "m" || life.type === "n") && state.phobj) {
       // Non-moving mobs/NPCs: still apply gravity to snap to ground
       const ph = state.phobj;
-      if (ph && !ph.onGround) {
+      if (!ph.onGround) {
         const steps = Math.max(1, Math.round(dtMs / MOB_PHYS_TIMESTEP));
         for (let s = 0; s < steps; s++) {
           mobPhysicsStep(map, ph, isSwimMap);
@@ -2508,8 +2507,6 @@ function updateMobCombatStates(dtMs) {
       state.dyingElapsed = 0;
       state.hp = state.maxHp;
       state.hitCounter = 0;
-      state.aggro = false;
-      state.aggroTarget = null;
       state.stance = "stand";
       state.frameIndex = 0;
       state.frameTimerMs = 0;
