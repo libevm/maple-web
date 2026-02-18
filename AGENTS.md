@@ -33,6 +33,14 @@
 - This includes: new draw functions, cache invalidation changes, new asset types,
   loading screen changes, debug overlay additions, and image decode pipeline changes.
 
+## Physics Documentation
+- `.memory/physics.md` documents the full physics system:
+  player movement, mob movement, foothold structures, gravity, swimming, climbing, and AI.
+- **Any change to physics constants, movement logic, foothold handling, collision detection,
+  mob AI behavior, or force/velocity calculations MUST update `physics.md`.**
+- This includes: new physics modes, constant tuning, foothold chain logic, jump mechanics,
+  rope/ladder changes, mob patrol behavior, and swim physics.
+
 ## Agent Guidance
 - Keep `.memory/` as the full progress snapshot for handoff/resume.
 - Ensure snapshots and progress notes are clear enough for another agent to continue without re-discovery.
