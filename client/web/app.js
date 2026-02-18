@@ -2144,40 +2144,32 @@ function drawDamageNumbers() {
     ctx.globalAlpha = alpha;
 
     if (dmgDigitsLoaded && !dn.miss) {
-      // ── WZ sprite rendering (C++ DamageNumber::draw) ──
+      // ── WZ sprite rendering — uniform digit size ──
       const digits = String(dn.value);
-      const firstDigit = parseInt(digits[0]);
       const isCrit = dn.critical;
-      const firstSet = isCrit ? dmgDigitImages.critFirst : dmgDigitImages.normalFirst;
-      const restSet = isCrit ? dmgDigitImages.critRest : dmgDigitImages.normalRest;
+      const digitSet = isCrit ? dmgDigitImages.critRest : dmgDigitImages.normalRest;
 
-      // Calculate total width for centering (C++ shift = total / 2)
-      let totalW = dmgGetAdvance(firstDigit, isCrit, true);
-      for (let i = 1; i < digits.length; i++) {
+      // Calculate total width for centering using uniform advance
+      let totalW = 0;
+      for (let i = 0; i < digits.length; i++) {
         const d = parseInt(digits[i]);
+        const adv = dmgGetAdvance(d, isCrit, false);
         if (i < digits.length - 1) {
           const next = parseInt(digits[i + 1]);
-          totalW += (dmgGetAdvance(d, isCrit, false) + dmgGetAdvance(next, isCrit, false)) / 2;
+          totalW += (adv + dmgGetAdvance(next, isCrit, false)) / 2;
         } else {
-          totalW += dmgGetAdvance(d, isCrit, false);
+          totalW += adv;
         }
       }
       const shift = totalW / 2;
 
       let drawX = screenX - shift;
 
-      // First digit (larger sprite from set0)
-      const firstSprite = firstSet[firstDigit];
-      if (firstSprite?.img?.complete) {
-        ctx.drawImage(firstSprite.img, drawX - firstSprite.ox, screenY - firstSprite.oy);
-      }
-      drawX += dmgGetAdvance(firstDigit, isCrit, true);
-
-      // Remaining digits (from set1, with alternating ±2 y-shift — C++ yshift)
-      for (let i = 1; i < digits.length; i++) {
+      // All digits same size, alternating ±2 y-shift
+      for (let i = 0; i < digits.length; i++) {
         const d = parseInt(digits[i]);
-        const yShift = (i % 2) ? -2 : 2;  // C++ (i%2) ? -2 : 2
-        const sprite = restSet[d];
+        const yShift = (i % 2) ? -2 : 2;
+        const sprite = digitSet[d];
         if (sprite?.img?.complete) {
           ctx.drawImage(sprite.img, drawX - sprite.ox, screenY - sprite.oy + yShift);
         }
@@ -2236,7 +2228,7 @@ function drawDamageNumbers() {
 function calculatePlayerDamageRange() {
   const p = runtime.player;
   // Beginner stats: STR≈4+level, DEX≈4
-  const str = 25 + p.level;
+  const str = 50 + p.level;
   const dex = 4;
   const primary = WEAPON_MULTIPLIER * str;
   const secondary = dex;
@@ -2454,6 +2446,14 @@ function applyAttackToMob(target) {
 function updatePlayerAttack(dt) {
   const player = runtime.player;
   if (!player.attacking) return;
+
+  // Cancel attack if player goes airborne or starts climbing
+  if (!player.onGround || player.climbing) {
+    player.attacking = false;
+    player.attackFrameIndex = 0;
+    player.attackFrameTimer = 0;
+    return;
+  }
 
   const frames = getCharacterActionFrames(player.attackStance);
   if (frames.length === 0) {
@@ -6986,8 +6986,8 @@ function bindInput() {
       runtime.input.jumpHeld = true;
     }
 
-    // Attack key (configurable, default C)
-    if (event.code === runtime.keybinds.attack) {
+    // Attack key (configurable, default C) — ignore held-key repeats
+    if (event.code === runtime.keybinds.attack && !event.repeat) {
       event.preventDefault();
       performAttack();
     }
