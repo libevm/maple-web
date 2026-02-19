@@ -8388,7 +8388,12 @@ function drawChatBubble() {
   const now = performance.now();
   if (runtime.player.bubbleExpiresAt < now || !runtime.player.bubbleText) return;
 
-  const anchor = worldToScreen(runtime.player.x, runtime.player.y - 70);
+  // C++ parity: chatballoon.draw(absp - Point<int16_t>(0, 85))
+  // When prone the sprite is much shorter, so lower the bubble offset
+  const action = runtime.player.action;
+  const isProne = action === "prone" || action === "proneStab";
+  const bubbleOffsetY = isProne ? 40 : 70;
+  const anchor = worldToScreen(runtime.player.x, runtime.player.y - bubbleOffsetY);
   const text = runtime.player.bubbleText;
 
   ctx.save();
