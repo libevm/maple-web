@@ -8996,7 +8996,7 @@ function drawLoadingScreen() {
     // Fallback: spinning circle while mushroom assets load
     const spinnerRadius = 14;
     const spinnerCx = cw / 2;
-    const spinnerCy = y - 60;
+    const spinnerCy = y - 80;
     const spinAngle = (performance.now() / 600) % (Math.PI * 2);
     ctx.save();
     ctx.lineWidth = 2.5;
@@ -9017,48 +9017,32 @@ function drawLoadingScreen() {
   // Play login BGM
   startLoginBgm();
 
-  // Title
-  ctx.shadowColor = "rgba(0, 0, 0, 0.7)";
-  ctx.shadowOffsetY = 1;
-  ctx.shadowBlur = 4;
-  ctx.fillStyle = "#fbbf24";
-  ctx.font = "bold 18px 'Dotum', Arial, sans-serif";
+  // Title — clean, no shadow
+  ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+  ctx.font = "500 15px -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("Loading map assets...", cw / 2, y - 40);
-  ctx.shadowColor = "transparent";
+  ctx.fillText("Loading map assets", cw / 2, y - 30);
 
-  // Bar background
-  roundRect(ctx, x, y, barWidth, barHeight, 4);
-  ctx.fillStyle = "rgba(20, 30, 50, 0.8)";
+  // Bar background — flat rounded pill
+  const barR = barHeight / 2;
+  roundRect(ctx, x, y, barWidth, barHeight, barR);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.08)";
   ctx.fill();
-  ctx.strokeStyle = "rgba(100, 130, 180, 0.25)";
-  ctx.lineWidth = 0.5;
-  ctx.stroke();
 
-  // Bar fill — gold gradient
+  // Bar fill — flat white
   if (progress > 0) {
-    const fillW = Math.max(6, Math.round(barWidth * progress));
-    const grad = ctx.createLinearGradient(x, y, x, y + barHeight);
-    grad.addColorStop(0, "#fbbf24");
-    grad.addColorStop(0.5, "#d4a020");
-    grad.addColorStop(1, "#fbbf24");
-    ctx.fillStyle = grad;
-    roundRect(ctx, x, y, fillW, barHeight, 4);
-    ctx.fill();
-    // Gloss
-    const glossGrad = ctx.createLinearGradient(x, y, x, y + barHeight / 2);
-    glossGrad.addColorStop(0, "rgba(255, 255, 255, 0.25)");
-    glossGrad.addColorStop(1, "rgba(255, 255, 255, 0)");
-    ctx.fillStyle = glossGrad;
-    roundRect(ctx, x, y, fillW, barHeight / 2, 4);
+    const fillW = Math.max(barHeight, Math.round(barWidth * progress));
+    roundRect(ctx, x, y, fillW, barHeight, barR);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
     ctx.fill();
   }
 
-  // Label
-  ctx.fillStyle = "#8899b0";
-  ctx.font = "12px 'Dotum', Arial, sans-serif";
-  ctx.fillText(runtime.loading.label || "Preparing assets", cw / 2, y + 30);
+  // Percentage label
+  const pct = Math.round(progress * 100);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
+  ctx.font = "400 11px -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+  ctx.fillText(`${pct}%`, cw / 2, y + 28);
 
   ctx.restore();
 }
