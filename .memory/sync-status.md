@@ -1,6 +1,6 @@
 # .memory Sync Status
 
-Last synced: 2026-02-20T08:15:00+11:00
+Last synced: 2026-02-20T09:30:00+11:00
 Status: ✅ Synced
 
 ## Current authoritative memory files
@@ -18,92 +18,79 @@ Status: ✅ Synced
 - `.memory/equipment-system.md`
 
 ## Codebase Metrics Snapshot
-- `client/web/app.js`: ~10100 lines (single-file debug web client)
-- Latest git: `04da4d5` on `origin/main`
+- `client/web/app.js`: ~10400 lines (single-file debug web client)
+- Latest git: `6628fa3` on `origin/main`
 - CI: `bun run ci` ✅
 
 ## What was synced in this pass
 
-### Tooltip always on top (2026-02-20, 04da4d5)
-- `.ui-tooltip` z-index raised from 30 to 99990
-- Ensures tooltip renders above game windows which use an incrementing z-index counter
+### Persistent browser Cache API (2026-02-20, 6628fa3)
+- `cachedFetch(url)` wraps all resource fetches with Cache API (`caches.open("maple-resources-v1")`)
+- Checks cache first, stores response on miss
+- `fetchJson()` now uses `cachedFetch()` for all `/resources/` JSON
+- `preloadLoadingScreenAssets()` uses `cachedFetch` for manifest, BGM, PNGs
+- Subsequent page loads serve from browser cache with zero network requests
 
-### Floating window z-order (2026-02-20, 1a81e5e)
-- Game windows now have dynamic z-index via `_winZCounter` (increments on each focus)
-- `bringWindowToFront(winEl)` called on: pointerdown on any `.game-window`, titlebar drag start, hotkey toggle open
-- Clicking a window that's behind another brings it to front
+### Mob name only after attack (2026-02-20, 51c476b)
+- Added `nameVisible` flag to mob state (default `false`)
+- Set `nameVisible = true` on any attack (hit or miss) in damage apply
+- Name label draw checks `state.nameVisible` — hidden until first hit
+- Resets on mob death/respawn (state re-initialized)
 
-### Fix double equip/unequip sound (2026-02-20, 5f65cde → d8bb521)
-- Root cause: dblclick preceded by two click events; first click started drag (DragStart), dblclick fired equip (DragEnd), second click also cancelled drag (DragEnd) = double sound
-- Fix 1 (d8bb521): `cancelItemDrag(silent)` — equip/unequip passes `true` to suppress redundant sound
-- Fix 2 (5f65cde): Single-click uses 200ms `setTimeout` before starting drag; dblclick `clearTimeout` cancels pending drag — prevents DragStart from firing at all on double-click
+### Player position init after map load (2026-02-20, f8ea031)
+- Moved spawn portal lookup, player x/y/velocity init, foothold placement, camera positioning,
+  animation state reset to AFTER `preloadMapAssets()` completes
+- Player cannot interact with the map until loading finishes
 
-### Loot system improvements (2026-02-20, 22d5b9e → f0bab4a)
-- Loot allowed in any position except sitting (was: `onGround` only)
-- Loot uses player touch hitbox AABB overlap with drop bounds (32×32) instead of fixed 50px range
-- Items must be `onGround` (done rotating/landing) to be lootable
+### Verbose loading label + percentage (2026-02-20, 14710b4)
+- Loading screen shows both status text and percentage: `"Loading assets 12/48 — 25%"`
 
-### Chat bubble follows prone position (2026-02-20, 833fe8c)
-- C++ parity: `chatballoon.draw(absp - Point(0, 85))` is fixed offset from feet
-- Prone sprite is ~28px tall vs ~60px standing
-- Bubble Y offset: 70px (standing) → 40px (prone/proneStab)
+### Compress login BGM + skip if map BGM playing (2026-02-20, 2e003d2)
+- Re-encoded `resourcesv2/sound/login.mp3`: mono, 22050Hz, 48kbps (3.6MB → 2.2MB)
+- `startLoginBgm()` checks `runtime.bgmAudio && !runtime.bgmAudio.paused` before playing
+- Prevents login BGM from overlapping map BGM on subsequent map loads
 
-### Close window sound (2026-02-20, 10ef06e)
-- Clicking the ✕ button on Equipment/Inventory/Keybinds windows now plays `MenuDown` sound
+### HUD button tooltips + hidden during loading (2026-02-20, f6aed48)
+- HUD buttons hidden with `.hud-hidden` class until first map load completes
+- `showHudButtons()` called on `loading.active = false`
+- Hover shows custom tooltip popup below button (dark frosted glass style)
+- Tooltips: "Key Bindings (K)", "Settings", "Debug Panel"
+- Replaced `title` attrs with `data-tooltip` for custom popup
 
-### Simplified item tooltip (2026-02-20, 25a89fb)
-- Tooltip shows only: 48px enlarged pixelated sprite, item name, description (async from String.wz)
-- Removed all stat/requirement/price/qty/ID clutter
-- Dark semi-transparent frosted glass background (`rgba(10,14,28,0.8)` + `backdrop-filter: blur(8px)`)
-- Centered layout, white text
+### Modern flat loading screen (2026-02-20, 39ec405)
+- Removed text shadows and gold gradients from progress bar
+- Title: white 85% opacity, system font
+- Bar: flat pill shape, white 8% bg, white 70% fill, no gloss
+- Gold spinner fallback shown while mushroom assets still loading
 
-### Slot-based inventory with drag swap (2026-02-20, 14ef726 → 1088582)
-- `INV_ROWS` 6→8, `INV_MAX_SLOTS = 32` per tab
-- Each item has `slot` field (0-31) for fixed grid position
-- `findFreeSlot(invType)` finds first unoccupied slot
-- Unified click handler per slot: pick up (no drag), swap (occupied), move (empty)
-- Clicking outside inventory/equip grid while dragging → drops item to map
-- Full tab rejects unequip/loot actions
+### Loading screen mushroom animation (2026-02-20, 7e6aa68 → 162f9f1)
+- Extracted Orange Mushroom sprites + login BGM to `resourcesv2/`
+- `resourcesv2/mob/orange-mushroom/`: manifest.json + 6 PNGs (stand, move, jump)
+- `resourcesv2/sound/login.mp3`: title/login BGM
+- Mushroom animates across progress bar region, 1.2x scale, bouncing sine wave
+- Login BGM plays during loading (looped, 35% volume), stops on load complete
+- `preloadLoadingScreenAssets()` runs in parallel with `loadMap()` (non-blocking)
+- Dev server (`serve-client-web.mjs`) serves `/resourcesv2/` route + `.mp3` content type
 
-### Face expressions: tongue + snoozing (2026-02-20, a76a094)
-- `face8` = "chu" (tongue, 😛), default key Digit8
-- `face9` = "hum" (snoozing, 😴), default key Digit9
-- Added to keybind labels, FACE_EXPRESSIONS map, gameplayKeys array
+### UI window toggles work over game windows (2026-02-20, abf587b)
+- Moved E/I/K toggle handlers above `input.enabled` check in keydown handler
+- Window toggles now work even when mouse is hovering over a game window
 
-### CANCLICK cursor animation slowdown (2026-02-20, a2cabc3)
-- `CURSOR_CANCLICK_DELAY = 350ms` per frame (was 100ms default)
-- Only applies when WZ data has no explicit delay (all cursor frames use fallback)
+### Keyboard Mappings keybind (2026-02-20, 2aabdd8)
+- Added `keybinds: "KeyK"` to default keybinds
+- Added "Keyboard Mappings" label in keybind UI
+- Toggle handler alongside equip/inventory
 
-### Chat log handle cursor (2026-02-20, 731542a)
-- Hover → CANCLICK cursor state, mousedown → CLICKING state
-- Release restores CANCLICK if still hovering, else IDLE
-
-### HUD restyle — MapleStory-faithful modern aesthetic (2026-02-20, 3e4fb68)
-
-**Canvas-drawn HUD (app.js):**
-- Status bar: frosted dark bg, gradient HP/MP gauges with gloss highlights, gold level text, Dotum font
-- Player name label: rounded dark tag with blue border tint, white text with shadow
-- Minimap: frosted glass panel, gold title, subtle blue borders
-- Map banner: gold text with shadow glow, Dotum font
-- FPS counter: frosted glass rounded rect
-- Chat bubble: white bg (MapleStory parity), dark text, Dotum font
-- Loading screen: gold gradient progress bar with gloss
-
-**CSS HUD (styles.css):**
-- HUD buttons: frosted glass with gold hover accent
-- Game windows: refined shadows, inner highlights
-- Item slots: diagonal gradient, hover glow
-- Tooltip: dark frosted glass (semi-transparent)
-- Chat bar/log: gradient bg, Dotum font
-- All UI fonts normalized to Dotum with Arial fallback
+### Sound debounce (2026-02-20, 02163a6)
+- `playUISound()` debounces: skips if same sound played < 100ms ago
+- Prevents double DragEnd during click→click→dblclick sequence
 
 ### Previous sync entries
 (All entries from prior syncs remain valid: WZ cursor fix, inventory tabs, equip/unequip,
 drop animation rewrite, ghost item anchor, item drag-drop, ground drops, loot system,
-ladder/rope bottom-exit, wall collision, prone hitbox, hit visuals, opacity animations,
-laser cooldown, trap collision, fall damage, mob knockback, background rendering, rope/ladder,
-fixed resolution 1024×768, UI windows, NPC dialogue, face keybinds, attack lag fix,
-portal foothold snap, etc.)
+NPC dialogue button-only, face expressions, slot-based inventory, floating window z-order,
+tooltip z-index, chat bubble prone, close window sound, simplified tooltip, CANCLICK delay,
+chat log handle cursor, HUD restyle, etc.)
 
 ## Key Data Structures
 
@@ -113,6 +100,12 @@ _winZCounter = 25  // increments on each bringWindowToFront() call
 
 // Item slot field
 playerInventory[i].slot  // 0-31, position within tab grid
+
+// Mob name visibility
+lifeRuntimeState[i].nameVisible  // false until attacked
+
+// Persistent cache
+RESOURCE_CACHE_NAME = "maple-resources-v1"  // Cache API key
 
 // Tooltip z-index: 99990 (above all windows, below cursor at 99999)
 ```

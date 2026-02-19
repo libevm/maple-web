@@ -78,7 +78,20 @@ with map tiles/objects/player based on their `renderLayer` assignment.
 
 ## Asset Pipeline (Load → Cache → Render)
 
-### Three-Layer Cache
+### Persistent Browser Cache (Cache API)
+
+```
+cachedFetch(url)  →  caches.open("maple-resources-v1")
+  → cache.match(url) → return if hit
+  → fetch(url) → cache.put(url, response.clone()) → return response
+```
+
+- All `/resources/` and `/resourcesv2/` fetches go through `cachedFetch()`
+- `fetchJson()` uses `cachedFetch()` instead of raw `fetch()`
+- Survives page reloads — subsequent visits serve from browser Cache Storage
+- Gracefully degrades if Cache API unavailable (falls back to network)
+
+### Three-Layer In-Memory Cache
 
 ```
 jsonCache     (Map<path, Promise<JSON>>)     — raw WZ JSON files from dev server
@@ -305,6 +318,8 @@ Life sprite frames extract basedata into separate objects, so deleting `frame.ba
 - Does NOT use `drawWorldImage` — handles flip via `ctx.translate/scale` directly
 - Name labels: yellow for NPCs, pink for mobs
 - HP bars: green/red gauge, shown for 3s after mob is hit
+- Name labels: hidden by default; only shown after player attacks the mob (`state.nameVisible`)
+  - Set to `true` on any attack (hit or miss); resets on mob death/respawn
 
 > **Note:** `drawLifeSprites` uses manual screen positioning (not `worldToScreen`).
 > Any changes to `worldToScreen` must be mirrored here.
@@ -360,11 +375,39 @@ tryUsePortal()
 ## Loading Screen
 
 `drawLoadingScreen()`:
-- Dark background fill
-- "Loading map assets..." text
-- Progress bar (width proportional to `loading.progress`)
-- Label text showing `"Loading assets X/Y"`
-- FPS counter still renders in loading/no-map states when enabled (`drawFpsCounter()`)
+- Dark background fill (`rgba(4, 8, 18, 0.94)`)
+- Modern flat style: system font, no text shadows, no gradients
+- "Loading map assets" title (white 85% opacity, 15px system font)
+- Progress bar: flat pill shape (full rounded corners), white 8% bg, white 70% fill
+- Verbose status label + percentage: `"Loading assets 12/48 — 25%"` (white 45% opacity)
+- FPS counter still renders in loading/no-map states when enabled
+
+### Animated Orange Mushroom
+- Sprites preloaded from `resourcesv2/mob/orange-mushroom/` (manifest.json + 6 PNGs)
+- `_loadingMushroom` state: frames, position, facing, bounce phase, animation timer
+- Runs back and forth within progress bar horizontal bounds
+- 1.2× scale, `move` stance (3 frames), bounce via `sin(phase) * -8`
+- WZ sprites face left natively → flipped when moving right
+- 70px margin above progress bar (groundY = barY - 70)
+- Fallback: gold spinning circle shown while mushroom assets still loading
+  (14px radius, 1.2 rad arc, 80px above bar)
+
+### Login BGM
+- Preloaded from `resourcesv2/sound/login.mp3` (mono, 48kbps, 2.2MB)
+- `startLoginBgm()`: plays looped at 35% volume during loading
+- Skips if map BGM already active (`runtime.bgmAudio && !runtime.bgmAudio.paused`)
+- `stopLoginBgm()`: called on `loading.active = false` (success + error paths)
+- `preloadLoadingScreenAssets()` runs in parallel with `loadMap()` (non-blocking)
+
+### Player Init After Load
+- Spawn portal lookup, player x/y/velocity, foothold placement, camera positioning,
+  and animation state reset all happen AFTER `preloadMapAssets()` completes
+- Player cannot interact with the map until loading finishes
+
+### HUD Buttons During Loading
+- All HUD buttons (Key Bindings, Settings, Debug) hidden with `.hud-hidden` until
+  first map load completes (`showHudButtons()` on `loading.active = false`)
+- Hover shows custom tooltip popup below button (dark frosted glass style)
 
 ## Debug / Diagnostics
 
