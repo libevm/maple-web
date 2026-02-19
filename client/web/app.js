@@ -576,8 +576,8 @@ function applyManualTeleport(x, y) {
     player.footholdId = null;
   }
 
-  runtime.camera.x = player.x;
-  runtime.camera.y = player.y - cameraHeightBias();
+  runtime.camera.x = clampCameraXToMapBounds(runtime.map, player.x);
+  runtime.camera.y = clampCameraYToMapBounds(runtime.map, player.y - cameraHeightBias());
   runtime.portalScroll.active = false;
 
   setStatus(`Teleported to x=${Math.round(player.x)}, y=${Math.round(player.y)}.`);
@@ -4086,7 +4086,7 @@ function startPortalMomentumScroll() {
   const startX = runtime.camera.x;
   const startY = runtime.camera.y;
   const targetX = clampCameraXToMapBounds(runtime.map, runtime.player.x);
-  const targetY = runtime.player.y - cameraHeightBias();
+  const targetY = clampCameraYToMapBounds(runtime.map, runtime.player.y - cameraHeightBias());
 
   const distance = Math.hypot(targetX - startX, targetY - startY);
   if (distance < 6) {
@@ -8179,8 +8179,8 @@ async function loadMap(mapId, spawnPortalName = null, spawnFromPortalTransfer = 
     runtime.faceAnimation.overrideExpression = null;
     runtime.faceAnimation.overrideUntilMs = 0;
 
-    runtime.camera.x = runtime.player.x;
-    runtime.camera.y = runtime.player.y - cameraHeightBias();
+    runtime.camera.x = clampCameraXToMapBounds(runtime.map, runtime.player.x);
+    runtime.camera.y = clampCameraYToMapBounds(runtime.map, runtime.player.y - cameraHeightBias());
     runtime.backgroundViewAnchorY = canvasEl.height / 2 - runtime.camera.y;
     runtime.portalScroll.active = false;
     runtime.portalScroll.elapsedMs = 0;

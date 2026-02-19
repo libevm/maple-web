@@ -41,6 +41,7 @@ tick(timestampMs)                ← requestAnimationFrame
     drawReactorMarkers()        ← debug overlay (magenta, if life markers enabled)
 12. drawHitboxOverlay()         ← debug overlay (if enabled)
 13. drawBackgroundLayer(1)      ← front backgrounds (front=1)
+13b. drawVRBoundsOverflowMask() ← black fill for areas outside VR bounds (when map < viewport)
 14. drawChatBubble()
 15. drawPlayerNameLabel()       ← player name tag below character
 16. drawStatusBar()             ← HP/MP/EXP bars at bottom
@@ -515,9 +516,10 @@ tryUsePortal()
   more of the bottom. At 600px: 0. At 1080px: 240. At 1440px: 420.
   Applied at all 4 camera target sites (teleport, portal scroll, smooth follow, map load).
   Still subject to `clampCameraYToMapBounds` — at map bottom edges, clamp may override bias.
-- **Short-map camera clamping** (fixed): when map is shorter than viewport, camera follows
-  player between anchor-top and anchor-bottom positions, preventing void on both sides
-  while keeping the player on-screen.
+- **Short-map camera clamping** (C++ parity): when map VR bounds are smaller than viewport,
+  camera locks top-aligned (Y) / left-aligned (X), matching C++ behavior. Overflow goes to
+  bottom/right. `drawVRBoundsOverflowMask()` blacks out areas outside VR bounds so
+  background tiles/objects beyond the designed scene are hidden.
 - **NPC dialogue overlay**: drawn after minimap, before transition overlay. Blocks player
   movement, jumping, and portal use while active. MapleStory-style box with NPC portrait,
   name/function header, word-wrapped text, clickable options for scripted NPCs, page
