@@ -4452,9 +4452,8 @@ function clampCameraXToMapBounds(map, desiredCenterX) {
     return Math.max(minCenterX, Math.min(maxCenterX, desiredCenterX));
   }
 
-  // C++ parity: map narrower than viewport — lock left-aligned
-  // (camera.x such that left screen edge = VRLeft, overflow goes right)
-  return mapLeft + halfWidth;
+  // Map narrower than viewport — center horizontally
+  return (mapLeft + mapRight) / 2;
 }
 
 function clampCameraYToMapBounds(map, desiredCenterY) {
@@ -4469,9 +4468,8 @@ function clampCameraYToMapBounds(map, desiredCenterY) {
     return Math.max(minCenterY, Math.min(maxCenterY, desiredCenterY));
   }
 
-  // C++ parity: map shorter than viewport — lock top-aligned
-  // (camera.y such that top screen edge = VRTop, overflow goes to bottom)
-  return mapTop + halfHeight;
+  // Map shorter than viewport — center vertically
+  return (mapTop + mapBottom) / 2;
 }
 
 function portalMomentumEase(t) {
