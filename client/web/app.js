@@ -1755,12 +1755,22 @@ function initChatLogResize() {
   let startY = 0;
   let startHeight = 0;
 
+  // Cursor state: show CANCLICK on hover, CLICKING on press
+  chatLogHandleEl.addEventListener("mouseenter", () => {
+    if (!wzCursor.clickState) setCursorState(CURSOR_CANCLICK);
+  });
+  chatLogHandleEl.addEventListener("mouseleave", () => {
+    if (!wzCursor.clickState) setCursorState(CURSOR_IDLE);
+  });
+
   chatLogHandleEl.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     dragging = true;
     startY = e.clientY;
     startHeight = chatLogCollapsed ? 0 : chatLogEl.offsetHeight;
     chatLogHandleEl.setPointerCapture(e.pointerId);
+    wzCursor.clickState = true;
+    setCursorState(CURSOR_CLICKING);
   });
 
   chatLogHandleEl.addEventListener("dblclick", (e) => {
@@ -1787,6 +1797,14 @@ function initChatLogResize() {
   window.addEventListener("pointerup", (e) => {
     if (!dragging) return;
     dragging = false;
+    wzCursor.clickState = false;
+    // Restore CANCLICK if pointer is still over the handle
+    const rect = chatLogHandleEl.getBoundingClientRect();
+    if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+      setCursorState(CURSOR_CANCLICK);
+    } else {
+      setCursorState(CURSOR_IDLE);
+    }
     if (!chatLogCollapsed) {
       chatLogExpandedHeight = chatLogEl.offsetHeight || chatLogExpandedHeight;
     }
