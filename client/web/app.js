@@ -3592,6 +3592,28 @@ function parseMapData(raw) {
     }));
 
 
+  // Pre-index tall wall columns by X — only columns with >= 500px total wall
+  // coverage are indexed (boundary/section walls, not interior level separators).
+  // Used by getWallX to prevent jumping through tall multi-segment walls while
+  // letting players pass interior walls at jump height (matching C++ feel).
+  const WALL_COLUMN_MIN_TOTAL_HEIGHT = 500;
+  const wallColumnsByX = new Map();
+  for (const wall of wallLines) {
+    const xKey = Math.round(wall.x);
+    let col = wallColumnsByX.get(xKey);
+    if (!col) {
+      col = { segments: [], totalHeight: 0 };
+      wallColumnsByX.set(xKey, col);
+    }
+    col.segments.push({ y1: wall.y1, y2: wall.y2 });
+    col.totalHeight += Math.abs(wall.y2 - wall.y1);
+  }
+  // Prune short columns — only keep tall boundary walls
+  for (const [xKey, col] of wallColumnsByX) {
+    if (col.totalHeight < WALL_COLUMN_MIN_TOTAL_HEIGHT) {
+      wallColumnsByX.delete(xKey);
+    }
+  }
 
   const points = [];
   for (const line of footholdLines) {
@@ -3642,7 +3664,7 @@ function parseMapData(raw) {
     footholdLines,
     footholdById,
     wallLines,
-
+    wallColumnsByX,
     walls,
     borders,
     footholdBounds: {
@@ -5134,36 +5156,58 @@ function isBlockingWall(foothold, minY, maxY) {
   return rangesOverlap(foothold.y1, foothold.y2, minY, maxY);
 }
 
-// Exact C++ FootholdTree::get_wall parity — check prev/prevprev (left) or
-// next/nextnext (right) for blocking walls. Only the immediate 2 chain links
-// are checked with the 50px Y window [nextY-50, nextY-1]. Falls back to
-// map side wall bounds when no blocking wall is found in the chain.
+// Check if a tall wall column (pre-indexed, >= 500px total height) has any
+// segment blocking the given Y range. Returns false for short/unindexed columns.
+function isTallWallColumnBlocking(map, wallX, minY, maxY) {
+  const col = map.wallColumnsByX?.get(Math.round(wallX));
+  if (!col) return false;
+  const segments = col.segments;
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    if (seg.y2 >= minY && seg.y1 <= maxY) return true;
+  }
+  return false;
+}
+
+// C++ FootholdTree::get_wall parity with tall-wall extension.
+// Standard path: check prev/prevprev (left) or next/nextnext (right) with
+// the 50px Y window [nextY-50, nextY-1].
+// Extension: when a chain-discovered wall is part of a tall column (>= 500px),
+// check the full column so players can't jump through boundary walls.
 function getWallX(map, current, left, nextY) {
   const minY = Math.floor(nextY) - 50;
   const maxY = Math.floor(nextY) - 1;
 
   if (left) {
     const prev = findFootholdById(map, current.prevId);
-    if (isBlockingWall(prev, minY, maxY)) {
-      return fhLeft(current);
+    if (prev && fhIsWall(prev)) {
+      if (isBlockingWall(prev, minY, maxY) || isTallWallColumnBlocking(map, prev.x1, minY, maxY)) {
+        return fhLeft(current);
+      }
     }
 
     const prevPrev = prev ? findFootholdById(map, prev.prevId) : null;
-    if (isBlockingWall(prevPrev, minY, maxY)) {
-      return fhLeft(prev);
+    if (prevPrev && fhIsWall(prevPrev)) {
+      if (isBlockingWall(prevPrev, minY, maxY) || isTallWallColumnBlocking(map, prevPrev.x1, minY, maxY)) {
+        return fhLeft(prev);
+      }
     }
 
     return map.walls?.left ?? map.bounds.minX;
   }
 
   const next = findFootholdById(map, current.nextId);
-  if (isBlockingWall(next, minY, maxY)) {
-    return fhRight(current);
+  if (next && fhIsWall(next)) {
+    if (isBlockingWall(next, minY, maxY) || isTallWallColumnBlocking(map, next.x1, minY, maxY)) {
+      return fhRight(current);
+    }
   }
 
   const nextNext = next ? findFootholdById(map, next.nextId) : null;
-  if (isBlockingWall(nextNext, minY, maxY)) {
-    return fhRight(next);
+  if (nextNext && fhIsWall(nextNext)) {
+    if (isBlockingWall(nextNext, minY, maxY) || isTallWallColumnBlocking(map, nextNext.x1, minY, maxY)) {
+      return fhRight(next);
+    }
   }
 
   return map.walls?.right ?? map.bounds.maxX;
