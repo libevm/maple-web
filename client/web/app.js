@@ -727,20 +727,28 @@ function dropItemOnMap() {
   const iconUri = getIconDataUri(draggedItem.iconKey);
   if (!iconUri) { cancelItemDrag(); return; }
 
-  // Spawn a ground drop at the player's position
+  // C++ Drop: start at player pos, dest offset to the side
+  // hspeed = (dest.x - start.x) / 48, vspeed = -5.0
   const dir = player.facingLeft ? -1 : 1;
+  const startX = player.x;
+  const startY = player.y - 4;
+  const destX = player.x + dir * (30 + Math.random() * 30);
+  // Find the foothold at the destination X to get proper landing Y
+  const destFh = findFootholdBelow(runtime.map, destX, startY - 50);
+  const destY = destFh ? destFh.y - 4 : player.y - 4;
+
   groundDrops.push({
     id: draggedItem.id,
     name: draggedItem.name,
     qty: draggedItem.source === "inventory" ? draggedItem.qty : 1,
     iconKey: draggedItem.iconKey,
     category: draggedItem.category,
-    x: player.x,
-    y: player.y - 20,
-    destX: player.x + dir * (30 + Math.random() * 20),
-    destY: player.y,
-    vx: dir * 2.0,
-    vy: DROP_SPAWN_VSPEED,
+    x: startX,
+    y: startY,
+    destX: destX,
+    destY: destY,
+    vx: (destX - startX) / 48,  // C++ parity: hspeed = delta / 48
+    vy: DROP_SPAWN_VSPEED,       // C++ parity: vspeed = -5.0
     onGround: false,
     opacity: 1.0,
     angle: 0,
@@ -763,19 +771,30 @@ function dropItemOnMap() {
 }
 
 // ── Ground drop physics + rendering ──
+// C++ uses physics.move_object(phobj) which applies gravity + foothold collision.
+// We replicate the same here per-tick.
+const DROP_PHYS_GRAVITY = 0.14;   // match game gravity per tick
+const DROP_PHYS_TERMINAL_VY = 8;  // terminal fall speed
+
 function updateGroundDrops(dt) {
+  // Run physics at fixed sub-steps for stability
+  const ticks = Math.round(dt * 60); // ~60fps ticks
   for (let i = groundDrops.length - 1; i >= 0; i--) {
     const drop = groundDrops[i];
 
     if (drop.pickingUp) {
-      // Fly toward player and fade
+      // C++ PICKEDUP state: fly toward looter and fade
       const elapsed = performance.now() - drop.pickupStart;
       const t = Math.min(1, elapsed / LOOT_ANIM_DURATION);
       const player = runtime.player;
-      drop.x += (player.x - drop.x) * 0.15;
-      drop.y += ((player.y - 40) - drop.y) * 0.15;
-      drop.opacity = 1 - t;
+      // C++ uses hspeed = looter.hspeed/2 + (hdelta-16)/PICKUPTIME
+      const hdelta = player.x - drop.x;
+      const vdelta = (player.y - 40) - drop.y;
+      drop.vx = hdelta * 0.12;
       drop.vy = -4.5;
+      drop.x += drop.vx;
+      drop.y += vdelta * 0.12;
+      drop.opacity = 1 - t;
       if (t >= 1) {
         groundDrops.splice(i, 1);
       }
@@ -783,24 +802,37 @@ function updateGroundDrops(dt) {
     }
 
     if (!drop.onGround) {
-      drop.vy += DROP_GRAVITY;
-      drop.x += drop.vx;
-      drop.y += drop.vy;
-      drop.angle += 0.2;
+      for (let tick = 0; tick < ticks; tick++) {
+        const prevX = drop.x;
+        const prevY = drop.y;
 
-      // Check if landed
-      const fh = findFootholdBelow(runtime.map, drop.x, drop.y - 10);
-      if (fh && drop.y >= fh.y) {
-        drop.y = fh.y;
-        drop.x = drop.destX || drop.x;
-        drop.y = drop.destY || drop.y;
-        drop.vx = 0;
-        drop.vy = 0;
-        drop.onGround = true;
-        drop.angle = 0;
+        // Apply gravity (C++ physics.move_object applies gravity each tick)
+        drop.vy += DROP_PHYS_GRAVITY;
+        if (drop.vy > DROP_PHYS_TERMINAL_VY) drop.vy = DROP_PHYS_TERMINAL_VY;
+        drop.x += drop.vx;
+        drop.y += drop.vy;
+
+        // C++ spin while airborne: angle += 0.2 per tick
+        drop.angle += 0.2;
+
+        // Foothold collision — check if we crossed a foothold this tick
+        if (drop.vy > 0 && runtime.map) {
+          const fh = findFootholdBelow(runtime.map, drop.x, prevY - 2);
+          if (fh && prevY <= fh.y && drop.y >= fh.y) {
+            // Landed — C++ snaps to dest position and switches to FLOATING
+            drop.x = drop.destX;
+            drop.y = drop.destY;
+            drop.vx = 0;
+            drop.vy = 0;
+            drop.onGround = true;
+            drop.angle = 0;
+            break;
+          }
+        }
       }
     } else {
-      // Floating bob animation (C++ cos(moved) * 2.5)
+      // FLOATING state: bob animation
+      // C++ phobj.y = basey + 5.0 + (cos(moved) - 1.0) * 2.5
       drop.bobPhase += DROP_BOB_SPEED;
       if (drop.bobPhase > Math.PI * 2) drop.bobPhase -= Math.PI * 2;
     }
