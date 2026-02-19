@@ -5955,15 +5955,9 @@ function drawBackgroundLayer(frontFlag) {
   const camY = runtime.camera.y;
 
   // C++ parity: map camera is represented as a view translation.
+  // viewX/viewY track camera every frame, matching C++ MapBackgrounds::draw.
   const viewX = screenHalfW - camX;
   const viewY = screenHalfH - camY;
-  const anchoredViewY = Number.isFinite(runtime.backgroundViewAnchorY)
-    ? runtime.backgroundViewAnchorY
-    : viewY;
-  // Fixed-resolution composition bias only (not character-position aligned).
-  // Maps authored around 600px height render more naturally on taller canvases
-  // when scenes are shifted down by a uniform amount.
-  const sceneFixedBiasY = Math.max(0, (canvasH - BG_REFERENCE_HEIGHT) / 2);
 
   if (frontFlag === 0 && runtime.map.blackBackground) {
     ctx.save();
@@ -6024,13 +6018,11 @@ function drawBackgroundLayer(frontFlag) {
 
     let y;
     if (vMobile) {
-      y = motionState.y + anchoredViewY;
+      y = motionState.y + viewY;
     } else {
-      const shiftY = (background.ry * (screenHalfH - anchoredViewY)) / 100 + screenHalfH;
+      const shiftY = (background.ry * (screenHalfH - viewY)) / 100 + screenHalfH;
       y = background.y + shiftY;
     }
-
-    y += sceneFixedBiasY;
 
     // C++ tiling: htile/vtile count-based, matching MapBackgrounds.cpp
     const tileX = background.type === 1 || background.type === 3 || background.type === 4 || background.type === 6 || background.type === 7;
