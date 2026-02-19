@@ -3592,18 +3592,21 @@ function parseMapData(raw) {
     }));
 
   // Pre-index wall segments by X — each key maps to an array of {y1, y2}
-  // segments at that X. Used by getWallX to check tall wall columns
-  // efficiently (avoids jump-through on multi-segment walls) while correctly
-  // ignoring wall segments that only extend below the player.
+  // segments at that X plus total coverage height. Used by getWallX to check
+  // tall wall columns efficiently (avoids jump-through on multi-segment walls)
+  // while correctly ignoring small platform edges.
+  const WALL_COLUMN_MIN_HEIGHT = 100; // px — columns shorter than this use C++-style 2-link only
   const wallColumnsByX = new Map();
   for (const wall of wallLines) {
     const xKey = Math.round(wall.x);
-    let segments = wallColumnsByX.get(xKey);
-    if (!segments) {
-      segments = [];
-      wallColumnsByX.set(xKey, segments);
+    let col = wallColumnsByX.get(xKey);
+    if (!col) {
+      col = { segments: [], totalHeight: 0 };
+      wallColumnsByX.set(xKey, col);
     }
-    segments.push({ y1: wall.y1, y2: wall.y2 });
+    const segHeight = Math.abs(wall.y2 - wall.y1);
+    col.segments.push({ y1: wall.y1, y2: wall.y2 });
+    col.totalHeight += segHeight;
   }
 
   const points = [];
@@ -5147,12 +5150,15 @@ function isBlockingWall(foothold, minY, maxY) {
   return rangesOverlap(foothold.y1, foothold.y2, minY, maxY);
 }
 
-// Check if any wall segment at wallX blocks the given Y range [minY, maxY].
-// Only blocks when a segment overlaps the check window (50px above player feet),
-// so walls that only extend below the player are correctly ignored.
+// Check if a tall wall column at wallX blocks the given Y range [minY, maxY].
+// Returns true only for columns with significant total height (>= 100px),
+// matching C++ behavior where small platform edges are naturally ignored at
+// jump height by the 2-link chain check. Tall walls (subway barriers etc.)
+// are checked segment-by-segment so jumping can't bypass them.
 function isWallColumnBlocking(map, wallX, minY, maxY) {
-  const segments = map.wallColumnsByX?.get(Math.round(wallX));
-  if (!segments) return false;
+  const col = map.wallColumnsByX?.get(Math.round(wallX));
+  if (!col || col.totalHeight < 100) return false;
+  const segments = col.segments;
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
     if (seg.y2 >= minY && seg.y1 <= maxY) return true;
