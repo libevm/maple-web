@@ -6086,7 +6086,13 @@ function updateObjectAnimations(dtMs) {
       if (state.timerMs >= frameDelay) {
         state.timerMs -= frameDelay;
         state.frameIndex = (state.frameIndex + 1) % obj.frameCount;
-        // No opacity reset — let it carry over for smooth transitions
+        // Snap to 0 when entering a "start invisible" frame (a0 === 0).
+        // This creates a clean cooldown gap before the fade-in ramp.
+        // All other transitions carry over smoothly.
+        const nextOpc = obj.frameOpacities?.[state.frameIndex];
+        if (nextOpc && nextOpc.start === 0) {
+          state.opacity = 0;
+        }
       }
     }
   }
