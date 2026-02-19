@@ -499,25 +499,26 @@ Items can be dropped on the map and looted by the player.
 
 ### Drop Spawning
 - Player clicks canvas while dragging an inventory/equip item
-- Drop spawns at `(player.x, player.y - 4)` with destination 30-60px in facing direction
-- C++ parity: `hspeed = (destX - startX) / 48`, `vspeed = -5.0`
+- Drop spawns at `(player.x, player.y - 4)` — X is fixed at player position, never changes
+- Foothold Y found via `findFootholdAtXNearY` / `findFootholdBelow` at drop X
+- `destY = footholdY - 4` (C++ parity: `basey = dest.y() - 4`)
 
-### Drop Physics (per-tick in `updateGroundDrops`)
-- Gravity: `DROP_PHYS_GRAVITY = 0.14` per tick (matches game engine)
-- Terminal velocity: `DROP_PHYS_TERMINAL_VY = 8`
-- Spin while airborne: `angle += 0.2` per tick (C++ SPINSTEP)
-- Foothold crossing detection: `prevY <= fh.y && newY >= fh.y`
-- On landing: snap to `(destX, destY)`, switch to FLOATING state
-- Fixed-tick sub-stepping (1 tick per update call at 60fps)
+### Drop Animation (C++ `Drop::update` parity)
+- **No horizontal movement** — X stays fixed at drop position
+- Initial `vspeed = -5.0` (upward arc), gravity `0.14/tick`, terminal velocity `8`
+- Spin while airborne: `angle += 0.2` per tick (C++ `SPINSTEP = 0.2f`)
+- Landing: when `Y >= destY` while falling → snap to `destY`, switch to FLOATING
+- Fixed-tick sub-stepping at 60Hz for stable simulation
+- Item is only lootable once animation completes (FLOATING state)
 
 ### Drop States (C++ parity)
-- **DROPPED** (`onGround=false`): physics-driven arc with spin
-- **FLOATING** (`onGround=true`): bob animation `cos(phase) * 2.5px`, phase += 0.025/tick
+- **DROPPED** (`onGround=false`): gravity-driven vertical arc with spin, X fixed
+- **FLOATING** (`onGround=true`): bob `y = basey + 5.0 + (cos(phase) - 1.0) * 2.5`, phase += 0.025/tick
 - **PICKEDUP** (`pickingUp=true`): fly toward player, fade out over 400ms
 
 ### Drop Rendering (`drawGroundDrops`)
 - Icon drawn at world position with camera transform
-- Bob offset applied when floating
+- Bob offset `5.0 + (cos(phase) - 1.0) * 2.5` applied when floating (C++ parity)
 - Rotation applied when airborne
 - Opacity modulated during pickup animation
 - No text labels on ground drops
@@ -525,16 +526,60 @@ Items can be dropped on the map and looted by the player.
 ### Loot Pickup
 - Z key (configurable) triggers `tryLootDrop()`
 - 50px range, player must be on ground
+- Only lootable when `drop.onGround` is true (animation must complete first)
 - One item per press (C++ `lootenabled` parity)
 - Item returns to inventory (stacks if same ID)
 - PickUpItem sound plays
 
 ### Item Drag System
 - `draggedItem` state: active, source, sourceIndex, id, name, qty, iconKey, category
-- Ghost item (`<img id="ghost-item">`) follows cursor at 60% opacity, z-index 99998
+- Ghost item (`<img id="ghost-item">`) follows cursor at 60% opacity, z-index 99998,
+  positioned with bottom-right at cursor via `transform: translate(-100%, -100%)`
 - Source slot dims to 40% while dragged
 - DragStart/DragEnd/DropItem/PickUpItem sounds from WZ
 - Escape or map change cancels drag
+
+### Inventory Tab System (C++ UIItemInventory parity)
+- 5 tabs: EQUIP, USE, SETUP (Set-up), ETC, CASH
+- Tab determined by item ID prefix: `floor(id / 1000000)` → 1=EQUIP, 2=USE, 3=SETUP, 4=ETC, 5=CASH
+- `inventoryTypeById(id)` helper (C++ `InventoryType::by_item_id`)
+- Each `playerInventory` item has `invType` field for tab filtering
+- `currentInvTab` state controls which tab is visible
+- Tab buttons in HTML `#inv-tabs` container with active highlighting
+- `refreshInvGrid()` filters inventory by `currentInvTab`
+
+### Equip / Unequip System
+- **Double-click equip slot** → `unequipItem(slotType)`:
+  removes from `playerEquipped`, adds to inventory EQUIP tab, deletes equip WZ data,
+  clears `characterPlacementTemplateCache` → sprite re-renders without the equip
+- **Double-click inventory EQUIP item** → `equipItemFromInventory(invIndex)`:
+  moves from inventory to `playerEquipped`, swaps existing if slot occupied,
+  calls `loadEquipWzData(id)` to fetch Character.wz JSON, clears placement cache
+- **Drop equipped item** on map:
+  removes from `playerEquipped`, deletes WZ data, clears placement cache
+- **Character rendering** uses `playerEquipped` (not `DEFAULT_EQUIPS`) to iterate equipment
+  in `getCharacterFrameData()` — dynamically reflects equip changes on sprite
+- **WZ data loading**: `loadEquipWzData(id)` resolves WZ folder via `equipWzCategoryFromId(id)`
+  (item ID prefix → Character.wz subfolder: Cap, Coat, Pants, Shoes, Weapon, etc.)
+- **Equip slot mapping**: `equipSlotFromId(id)` determines which `playerEquipped` key an item
+  occupies (C++ `EquipData::get_eqslot` parity)
+
+## WZ Cursor System
+
+- Cursor is an HTML `<img>` overlay (`#wz-cursor`) positioned at `position:fixed; z-index:99999`
+- Loaded from `UI.wz/Basic.img.json` → `Cursor` node, states keyed by numeric ID
+- States: `IDLE=0` (1 frame), `CANCLICK=1` (2 frames), `CLICKING=12` (1 frame)
+- `setCursorState(state)` changes state, resets frame index/timer
+- `updateCursorAnimation(dtMs)` advances multi-frame animation (called in game loop tick)
+- `updateCursorElement()` syncs HTML element src/position to current state/frame
+  - Called in game loop tick (after `updateCursorAnimation`) AND on mouse move events
+  - Game-loop call ensures state changes (click/release) and animation frame advances
+    are reflected immediately, even when the mouse is stationary
+- `wzCursor.clickState` flag: true while mouse button is held down
+  - Set on `pointerdown`, cleared on `pointerup`
+  - Guards `mousemove` handler from overriding CLICKING state with hover state
+- On `pointerup`: restores hover-appropriate state (CANCLICK if over NPC/dialogue option, else IDLE)
+  matching C++ `UI::send_cursor(false)` → `state->send_cursor(pos, IDLE)` flow
 
 ## Known Issues / Investigation
 

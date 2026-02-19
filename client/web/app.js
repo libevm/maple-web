@@ -444,6 +444,50 @@ const draggedItem = {
   category: null,   // for equip items
 };
 
+// ── Inventory type / equip category helpers (C++ parity) ──
+
+// C++ InventoryType::by_item_id — prefix = id / 1000000
+const INV_TABS = ["EQUIP", "USE", "SETUP", "ETC", "CASH"];
+let currentInvTab = "EQUIP";
+
+function inventoryTypeById(itemId) {
+  const prefix = Math.floor(itemId / 1000000);
+  const types = [null, "EQUIP", "USE", "SETUP", "ETC", "CASH"];
+  return types[prefix] || null;
+}
+
+// WZ folder from equip item ID — maps id prefix to Character.wz subfolder
+function equipWzCategoryFromId(id) {
+  const p = Math.floor(id / 10000);
+  if (p === 100) return "Cap";
+  if (p >= 101 && p <= 103) return "Accessory";
+  if (p === 104) return "Coat";
+  if (p === 105) return "Longcoat";
+  if (p === 106) return "Pants";
+  if (p === 107) return "Shoes";
+  if (p === 108) return "Glove";
+  if (p === 109) return "Shield";
+  if (p === 110) return "Cape";
+  if (p === 111) return "Ring";
+  if (p >= 130 && p <= 170) return "Weapon";
+  return null;
+}
+
+// Equip slot key (for playerEquipped map) from equip item ID
+// C++ EquipData determines slot from index = id/10000 - 100
+function equipSlotFromId(id) {
+  const p = Math.floor(id / 10000);
+  if (p === 100) return "Cap";
+  if (p === 104 || p === 105) return "Coat"; // Top + Overall share Coat slot
+  if (p === 106) return "Pants";
+  if (p === 107) return "Shoes";
+  if (p === 108) return "Glove";
+  if (p === 109) return "Shield";
+  if (p === 110) return "Cape";
+  if (p >= 130 && p <= 170) return "Weapon";
+  return null;
+}
+
 /** Ground drops — items on the map floor */
 const groundDrops = [];
 // Each: { id, name, qty, iconKey, x, y, vx, vy, onGround, opacity, angle, bobPhase, spawnTime, category }
@@ -451,8 +495,10 @@ const groundDrops = [];
 const DROP_PICKUP_RANGE = 50;   // C++ uses drop bounds(32x32) at player pos
 const DROP_BOB_SPEED = 0.025;   // C++ moved += 0.025 per tick
 const DROP_BOB_AMP = 2.5;       // C++ cos(moved) * 2.5
-const DROP_GRAVITY = 0.35;      // approximate drop gravity
 const DROP_SPAWN_VSPEED = -5.0; // C++ phobj.vspeed = -5.0f
+const DROP_SPINSTEP = 0.2;      // C++ static const float SPINSTEP = 0.2f
+const DROP_PHYS_GRAVITY = 0.14; // match game gravity per tick
+const DROP_PHYS_TERMINAL_VY = 8;// terminal fall speed
 const LOOT_ANIM_DURATION = 400; // ms — pickup fly animation
 
 /** Icon data URI cache */
@@ -562,7 +608,8 @@ function initPlayerInventory() {
   ];
   for (const item of starterItems) {
     const iconKey = loadItemIcon(item.id);
-    playerInventory.push({ id: item.id, name: "...", qty: item.qty, iconKey });
+    const invType = inventoryTypeById(item.id) || "ETC";
+    playerInventory.push({ id: item.id, name: "...", qty: item.qty, iconKey, invType });
     loadItemName(item.id).then(name => {
       const entry = playerInventory.find(e => e.id === item.id);
       if (entry) { entry.name = name || `Item ${item.id}`; refreshUIWindows(); }
@@ -631,23 +678,49 @@ function refreshEquipGrid() {
       source: "equip", index: slot.type,
       item: { id: equipped.id, name: equipped.name, qty: 1, iconKey: equipped.iconKey, category: slot.type },
     } : null;
-    equipGridEl.appendChild(buildSlotEl(iconUri, slot.label, 0, tooltip, clickData));
+    const slotEl = buildSlotEl(iconUri, slot.label, 0, tooltip, clickData);
+    // Double-click → unequip to inventory
+    if (equipped) {
+      slotEl.addEventListener("dblclick", () => unequipItem(slot.type));
+    }
+    equipGridEl.appendChild(slotEl);
   }
 }
 
 function refreshInvGrid() {
   if (!invGridEl) return;
   invGridEl.innerHTML = "";
+
+  // Update tab button active state
+  const tabBtns = document.querySelectorAll("#inv-tabs .inv-tab");
+  for (const btn of tabBtns) {
+    btn.classList.toggle("active", btn.dataset.tab === currentInvTab);
+  }
+
+  // Filter items by current tab
+  const tabItems = [];
+  for (let i = 0; i < playerInventory.length; i++) {
+    const it = playerInventory[i];
+    if (it.invType === currentInvTab) tabItems.push({ item: it, realIndex: i });
+  }
+
   const totalSlots = INV_COLS * INV_ROWS;
   for (let i = 0; i < totalSlots; i++) {
-    const item = playerInventory[i] ?? null;
+    const entry = tabItems[i] ?? null;
+    const item = entry?.item ?? null;
+    const realIdx = entry?.realIndex ?? -1;
     const iconUri = item ? getIconDataUri(item.iconKey) : null;
     const tooltip = item ? { name: item.name, qty: item.qty, id: item.id } : null;
     const clickData = item ? {
-      source: "inventory", index: i,
-      item: { id: item.id, name: item.name, qty: item.qty, iconKey: item.iconKey },
+      source: "inventory", index: realIdx,
+      item: { id: item.id, name: item.name, qty: item.qty, iconKey: item.iconKey, category: item.category },
     } : null;
-    invGridEl.appendChild(buildSlotEl(iconUri, null, item?.qty ?? 0, tooltip, clickData));
+    const slotEl = buildSlotEl(iconUri, null, item?.qty ?? 0, tooltip, clickData);
+    // Double-click on EQUIP tab item → equip it
+    if (item && currentInvTab === "EQUIP" && clickData) {
+      slotEl.addEventListener("dblclick", () => equipItemFromInventory(realIdx));
+    }
+    invGridEl.appendChild(slotEl);
   }
 }
 
@@ -721,21 +794,115 @@ function cancelItemDrag() {
   refreshUIWindows();
 }
 
+// ── Equip / Unequip system ──
+
+// Load WZ data for an equip item so the character sprite can render it
+async function loadEquipWzData(equipId) {
+  const category = equipWzCategoryFromId(equipId);
+  if (!category) return;
+  const padded = String(equipId).padStart(8, "0");
+  const path = `/resources/Character.wz/${category}/${padded}.img.json`;
+  try {
+    const data = await fetchJson(path);
+    runtime.characterEquipData[equipId] = data;
+    // Clear placement cache so next frame recomposes with new equip
+    characterPlacementTemplateCache.clear();
+  } catch (e) {
+    rlog(`Failed to load equip WZ data for ${equipId}: ${e.message}`);
+  }
+}
+
+// Unequip: remove from equipment → add to inventory EQUIP tab → update sprite
+function unequipItem(slotType) {
+  const equipped = playerEquipped.get(slotType);
+  if (!equipped) return;
+
+  // Cancel any active drag first
+  if (draggedItem.active) cancelItemDrag();
+
+  // Remove from equipment
+  playerEquipped.delete(slotType);
+
+  // Add to inventory EQUIP tab
+  playerInventory.push({
+    id: equipped.id,
+    name: equipped.name,
+    qty: 1,
+    iconKey: equipped.iconKey,
+    invType: "EQUIP",
+    category: slotType,
+  });
+
+  // Remove equip data from rendering
+  delete runtime.characterEquipData[equipped.id];
+
+  // Force character sprite to recompose without this equip
+  characterPlacementTemplateCache.clear();
+
+  playUISound("DragEnd");
+  refreshUIWindows();
+}
+
+// Equip: move from inventory EQUIP tab → equipment slot → update sprite
+function equipItemFromInventory(invIndex) {
+  const item = playerInventory[invIndex];
+  if (!item) return;
+  if (item.invType !== "EQUIP") return;
+
+  // Cancel any active drag first
+  if (draggedItem.active) cancelItemDrag();
+
+  const slotType = item.category || equipSlotFromId(item.id);
+  if (!slotType) return;
+
+  // If something already in that slot, swap to inventory
+  const existing = playerEquipped.get(slotType);
+  if (existing) {
+    playerInventory.push({
+      id: existing.id,
+      name: existing.name,
+      qty: 1,
+      iconKey: existing.iconKey,
+      invType: "EQUIP",
+      category: slotType,
+    });
+    // Remove old equip data from rendering
+    delete runtime.characterEquipData[existing.id];
+  }
+
+  // Remove from inventory
+  playerInventory.splice(invIndex, 1);
+
+  // Add to equipment
+  playerEquipped.set(slotType, {
+    id: item.id,
+    name: item.name,
+    iconKey: item.iconKey,
+  });
+
+  // Load WZ data for rendering the new equip
+  loadEquipWzData(item.id);
+
+  // Force character sprite to recompose
+  characterPlacementTemplateCache.clear();
+
+  playUISound("DragEnd");
+  refreshUIWindows();
+}
+
 function dropItemOnMap() {
   if (!draggedItem.active) return;
   const player = runtime.player;
   const iconUri = getIconDataUri(draggedItem.iconKey);
   if (!iconUri) { cancelItemDrag(); return; }
 
-  // C++ Drop: start at player pos, dest offset to the side
-  // hspeed = (dest.x - start.x) / 48, vspeed = -5.0
-  const dir = player.facingLeft ? -1 : 1;
-  const startX = player.x;
+  // Drop X stays fixed at player position (no horizontal drift).
+  // Find the foothold below at drop X for the landing destination.
+  // C++ parity: start.y - 4, dest.y - 4, vspeed = -5.0, hspeed = 0
+  const dropX = player.x;
   const startY = player.y - 4;
-  const destX = player.x + dir * (30 + Math.random() * 30);
-  // Find the foothold at the destination X near player Y for landing
-  const destFh = findFootholdAtXNearY(runtime.map, destX, player.y, 60)
-              || findFootholdBelow(runtime.map, destX, player.y - 100);
+  const destFh = findFootholdAtXNearY(runtime.map, dropX, player.y, 60)
+              || findFootholdBelow(runtime.map, dropX, player.y - 100);
   const destY = destFh ? destFh.y - 4 : player.y - 4;
 
   groundDrops.push({
@@ -744,12 +911,10 @@ function dropItemOnMap() {
     qty: draggedItem.source === "inventory" ? draggedItem.qty : 1,
     iconKey: draggedItem.iconKey,
     category: draggedItem.category,
-    x: startX,
+    x: dropX,
     y: startY,
-    destX: destX,
-    destY: destY,
-    vx: (destX - startX) / 48,  // C++ parity: hspeed = delta / 48
-    vy: DROP_SPAWN_VSPEED,       // C++ parity: vspeed = -5.0
+    destY: destY,             // foothold landing Y (C++ basey = dest.y() - 4)
+    vy: DROP_SPAWN_VSPEED,    // C++ parity: vspeed = -5.0 (upward first)
     onGround: false,
     opacity: 1.0,
     angle: 0,
@@ -763,7 +928,12 @@ function dropItemOnMap() {
   if (draggedItem.source === "inventory") {
     playerInventory.splice(draggedItem.sourceIndex, 1);
   } else if (draggedItem.source === "equip") {
-    playerEquipped.delete(draggedItem.sourceIndex);
+    const slotType = draggedItem.sourceIndex; // sourceIndex is the slot type for equips
+    const equipped = playerEquipped.get(slotType);
+    playerEquipped.delete(slotType);
+    // Remove equip WZ data and recompose character sprite
+    if (equipped) delete runtime.characterEquipData[equipped.id];
+    characterPlacementTemplateCache.clear();
   }
 
   draggedItem.active = false;
@@ -772,28 +942,24 @@ function dropItemOnMap() {
 }
 
 // ── Ground drop physics + rendering ──
-// C++ uses physics.move_object(phobj) which applies gravity + foothold collision.
-// We replicate the same here per-tick.
-const DROP_PHYS_GRAVITY = 0.14;   // match game gravity per tick
-const DROP_PHYS_TERMINAL_VY = 8;  // terminal fall speed
+// C++ Drop::update uses physics.move_object for DROPPED state (gravity + foothold
+// collision), then snaps to dest on landing. X is fixed (hspeed = 0 for our drops).
+// vspeed = -5.0 gives initial upward arc, gravity brings it down to foothold.
+// SPINSTEP = 0.2 per tick while airborne. Only lootable once FLOATING.
 
 function updateGroundDrops(dt) {
-  // Run physics at fixed sub-steps for stability
-  const ticks = Math.round(dt * 60); // ~60fps ticks
+  const ticks = Math.max(1, Math.round(dt * 60)); // fixed-step sub-ticks at 60Hz
   for (let i = groundDrops.length - 1; i >= 0; i--) {
     const drop = groundDrops[i];
 
     if (drop.pickingUp) {
-      // C++ PICKEDUP state: fly toward looter and fade
+      // C++ PICKEDUP: vspeed = -4.5, opacity -= 1/48 per tick, fly toward looter
       const elapsed = performance.now() - drop.pickupStart;
       const t = Math.min(1, elapsed / LOOT_ANIM_DURATION);
       const player = runtime.player;
-      // C++ uses hspeed = looter.hspeed/2 + (hdelta-16)/PICKUPTIME
       const hdelta = player.x - drop.x;
       const vdelta = (player.y - 40) - drop.y;
-      drop.vx = hdelta * 0.12;
-      drop.vy = -4.5;
-      drop.x += drop.vx;
+      drop.x += hdelta * 0.12;
       drop.y += vdelta * 0.12;
       drop.opacity = 1 - t;
       if (t >= 1) {
@@ -803,32 +969,26 @@ function updateGroundDrops(dt) {
     }
 
     if (!drop.onGround) {
+      // DROPPED state — C++ physics: gravity per tick, no hspeed, spin
       for (let tick = 0; tick < ticks; tick++) {
-        const prevX = drop.x;
         const prevY = drop.y;
 
-        // Apply gravity (C++ physics.move_object applies gravity each tick)
+        // C++ physics.move_normal: gravity each tick
         drop.vy += DROP_PHYS_GRAVITY;
         if (drop.vy > DROP_PHYS_TERMINAL_VY) drop.vy = DROP_PHYS_TERMINAL_VY;
-        drop.x += drop.vx;
         drop.y += drop.vy;
 
-        // C++ spin while airborne: angle += 0.2 per tick
-        drop.angle += 0.2;
+        // C++ spin while airborne: angle += SPINSTEP per tick
+        drop.angle += DROP_SPINSTEP;
 
-        // Foothold collision — check if we crossed a foothold this tick
-        if (drop.vy > 0 && runtime.map) {
-          const fh = findFootholdBelow(runtime.map, drop.x, prevY - 2);
-          if (fh && prevY <= fh.y && drop.y >= fh.y) {
-            // Landed — C++ snaps to dest position and switches to FLOATING
-            drop.x = drop.destX;
-            drop.y = drop.destY;
-            drop.vx = 0;
-            drop.vy = 0;
-            drop.onGround = true;
-            drop.angle = 0;
-            break;
-          }
+        // Land when Y crosses destY (foothold) while falling
+        if (drop.vy > 0 && drop.y >= drop.destY) {
+          // C++ parity: snap to dest, switch to FLOATING, zero velocity, reset angle
+          drop.y = drop.destY;
+          drop.vy = 0;
+          drop.onGround = true;
+          drop.angle = 0;
+          break;
         }
       }
     } else {
@@ -861,13 +1021,23 @@ function drawGroundDrops() {
 
     const sx = Math.round(drop.x - camX + halfW);
     const sy = Math.round(drop.y - camY + halfH);
-    const bobY = drop.onGround ? (Math.cos(drop.bobPhase) - 1) * DROP_BOB_AMP : 0;
+    // C++ FLOATING: phobj.y = basey + 5.0 + (cos(moved) - 1.0) * 2.5
+    const bobY = drop.onGround ? 5.0 + (Math.cos(drop.bobPhase) - 1) * DROP_BOB_AMP : 0;
 
     ctx.save();
     ctx.globalAlpha = drop.opacity;
-    ctx.translate(sx, sy + bobY - 16);
-    if (drop.angle !== 0) ctx.rotate(drop.angle);
-    ctx.drawImage(img, -img.width / 2, -img.height / 2);
+    if (drop.angle !== 0) {
+      // Spin around icon center while airborne (no visual X drift)
+      const cx = sx;
+      const cy = sy + bobY - img.height / 2;
+      ctx.translate(cx, cy);
+      ctx.rotate(drop.angle);
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+    } else {
+      // Anchor bottom-center at drop position so item sits above foothold
+      ctx.translate(sx, sy + bobY);
+      ctx.drawImage(img, -img.width / 2, -img.height);
+    }
     ctx.restore();
   }
 }
@@ -890,18 +1060,23 @@ function tryLootDrop() {
       drop.pickupStart = performance.now();
 
       // Add back to inventory
-      const existing = playerInventory.find(e => e.id === drop.id);
-      if (existing) {
+      const invType = inventoryTypeById(drop.id) || "ETC";
+      const existing = playerInventory.find(e => e.id === drop.id && e.invType === invType);
+      if (existing && invType !== "EQUIP") {
+        // Stackable items (non-equip) merge quantities
         existing.qty += drop.qty;
       } else {
-        const iconKey = drop.category
-          ? loadEquipIcon(drop.id, drop.category)
+        const wzCat = equipWzCategoryFromId(drop.id);
+        const iconKey = wzCat
+          ? loadEquipIcon(drop.id, wzCat)
           : loadItemIcon(drop.id);
         playerInventory.push({
           id: drop.id,
           name: drop.name,
           qty: drop.qty,
           iconKey: iconKey,
+          invType,
+          category: drop.category || null,
         });
       }
 
@@ -1035,7 +1210,7 @@ document.body.appendChild(_cursorEl);
 // Ghost item element (follows cursor when dragging an item)
 const _ghostItemEl = document.createElement("img");
 _ghostItemEl.id = "ghost-item";
-_ghostItemEl.style.cssText = "position:fixed;z-index:99998;pointer-events:none;image-rendering:pixelated;display:none;opacity:0.6;";
+_ghostItemEl.style.cssText = "position:fixed;z-index:99998;pointer-events:none;image-rendering:pixelated;display:none;opacity:0.6;transform:translate(-100%,-100%);";
 document.body.appendChild(_ghostItemEl);
 
 function updateCursorElement() {
@@ -1056,8 +1231,8 @@ function updateCursorElement() {
     if (iconUri) {
       if (_ghostItemEl.src !== iconUri) _ghostItemEl.src = iconUri;
       _ghostItemEl.style.display = "block";
-      _ghostItemEl.style.left = `${wzCursor.clientX + 12}px`;
-      _ghostItemEl.style.top = `${wzCursor.clientY + 12}px`;
+      _ghostItemEl.style.left = `${wzCursor.clientX + 8}px`;
+      _ghostItemEl.style.top = `${wzCursor.clientY + 8}px`;
     }
   } else {
     _ghostItemEl.style.display = "none";
@@ -5245,13 +5420,20 @@ function requestCharacterData() {
   if (!runtime.characterDataPromise) {
     runtime.characterDataPromise = (async () => {
       try {
+        // Build equip fetch list from currently equipped items
+        const equipEntries = [...playerEquipped.entries()].map(([slotType, eq]) => ({
+          id: eq.id,
+          category: equipWzCategoryFromId(eq.id) || slotType,
+          padded: String(eq.id).padStart(8, "0"),
+        }));
+
         const fetches = [
           fetchJson("/resources/Character.wz/00002000.img.json"),
           fetchJson("/resources/Character.wz/00012000.img.json"),
           fetchJson("/resources/Character.wz/Face/00020000.img.json"),
           fetchJson("/resources/Base.wz/zmap.img.json"),
           fetchJson(`/resources/Character.wz/${DEFAULT_HAIR_PATH}`),
-          ...DEFAULT_EQUIPS.map((eq) => fetchJson(`/resources/Character.wz/${eq.path}`)),
+          ...equipEntries.map((eq) => fetchJson(`/resources/Character.wz/${eq.category}/${eq.padded}.img.json`)),
         ];
 
         const results = await Promise.all(fetches);
@@ -5263,8 +5445,8 @@ function requestCharacterData() {
         runtime.zMapOrder = buildZMapOrder(zMapData);
         runtime.characterHairData = hairData;
 
-        for (let i = 0; i < DEFAULT_EQUIPS.length; i++) {
-          runtime.characterEquipData[DEFAULT_EQUIPS[i].id] = equipResults[i];
+        for (let i = 0; i < equipEntries.length; i++) {
+          runtime.characterEquipData[equipEntries[i].id] = equipResults[i];
         }
       } finally {
         runtime.characterDataPromise = null;
@@ -5700,11 +5882,11 @@ function getCharacterFrameData(
     frameParts.push(hp);
   }
 
-  // Equipment
-  for (const equip of DEFAULT_EQUIPS) {
-    const equipData = runtime.characterEquipData[equip.id];
+  // Equipment — iterate currently equipped items (dynamic, not DEFAULT_EQUIPS)
+  for (const [, equipped] of playerEquipped) {
+    const equipData = runtime.characterEquipData[equipped.id];
     if (!equipData) continue;
-    const equipParts = getEquipFrameParts(equipData, action, frameIndex, `equip:${equip.id}`);
+    const equipParts = getEquipFrameParts(equipData, action, frameIndex, `equip:${equipped.id}`);
     for (const ep of equipParts) {
       frameParts.push(ep);
     }
@@ -8752,6 +8934,7 @@ function tick(timestampMs) {
     }
 
     updateCursorAnimation(elapsed);
+    updateCursorElement();
 
     const afterUpdate = performance.now();
     render();
@@ -9321,7 +9504,15 @@ function bindInput() {
 
   canvasEl.addEventListener("pointerup", () => {
     wzCursor.clickState = false;
-    setCursorState(CURSOR_IDLE);
+    // Restore hover-appropriate cursor state (C++ parity: release passes through UI state)
+    let nextState = CURSOR_IDLE;
+    if (runtime.npcDialogue.active) {
+      nextState = runtime.npcDialogue.hoveredOption !== -1 ? CURSOR_CANCLICK : CURSOR_IDLE;
+    } else if (!runtime.loading.active && !runtime.portalWarpInProgress && runtime.map) {
+      const npc = findNpcAtScreen(wzCursor.x, wzCursor.y);
+      if (npc) nextState = CURSOR_CANCLICK;
+    }
+    setCursorState(nextState);
   });
 
   window.addEventListener("keydown", (event) => {
@@ -9554,6 +9745,15 @@ initPlayerEquipment();
 initPlayerInventory();
 initUIWindowDrag();
 refreshUIWindows();
+
+// Wire inventory tab buttons
+for (const btn of document.querySelectorAll("#inv-tabs .inv-tab")) {
+  btn.addEventListener("click", () => {
+    currentInvTab = btn.dataset.tab;
+    refreshInvGrid();
+  });
+}
+
 void loadCursorAssets();
 initializeTeleportPresetInputs();
 initializeStatInputs();

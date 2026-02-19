@@ -577,6 +577,43 @@ button {
   padding: 6px;
 }
 
+/* ── Inventory tabs ── */
+.inv-tabs {
+  display: flex;
+  padding: 2px 4px 0;
+  gap: 1px;
+  background: #b0bace;
+}
+
+.inv-tab {
+  flex: 1;
+  padding: 2px 0;
+  font-size: 9px;
+  font-family: "Dotum", "Arial", sans-serif;
+  font-weight: 600;
+  color: #4a5a70;
+  background: linear-gradient(180deg, #c8d0dc 0%, #b8c2d0 100%);
+  border: 1px solid #8a9bb5;
+  border-bottom: none;
+  border-radius: 3px 3px 0 0;
+  cursor: none;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.inv-tab:hover {
+  background: linear-gradient(180deg, #dce2ec 0%, #c8d0dc 100%);
+  color: #2a3a50;
+}
+
+.inv-tab.active {
+  background: linear-gradient(180deg, #e8edf4 0%, #d8dfe9 100%);
+  color: #1a2a40;
+  border-bottom: 1px solid #d8dfe9;
+  position: relative;
+  top: 1px;
+}
+
 /* ── Inventory grid ── */
 .inv-grid {
   display: grid;
