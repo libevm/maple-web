@@ -299,6 +299,7 @@ const runtime = {
     loot: "KeyZ",
     equip: "KeyE",
     inventory: "KeyI",
+    keybinds: "KeyK",
     face1: "Digit1",
     face2: "Digit2",
     face3: "Digit3",
@@ -1529,6 +1530,7 @@ const KEYBIND_LABELS = {
   loot: "Loot",
   equip: "Equipment",
   inventory: "Inventory",
+  keybinds: "Keyboard Mappings",
   face1: "😣 Pain",
   face2: "😊 Happy",
   face3: "😟 Troubled",
@@ -9886,6 +9888,7 @@ function bindInput() {
     // UI window toggles
     if (event.code === runtime.keybinds.equip && !event.repeat) { toggleUIWindow("equip"); return; }
     if (event.code === runtime.keybinds.inventory && !event.repeat) { toggleUIWindow("inventory"); return; }
+    if (event.code === runtime.keybinds.keybinds && !event.repeat) { toggleUIWindow("keybinds"); return; }
     if (event.code === runtime.keybinds.loot && !event.repeat) {
       event.preventDefault();
       tryLootDrop();
