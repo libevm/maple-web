@@ -7,6 +7,7 @@ const requestedPort = Number(process.env.CLIENT_WEB_PORT ?? "5173");
 const repoRoot = normalize(join(import.meta.dir, "..", ".."));
 const webRoot = join(repoRoot, "client", "web");
 const resourcesRoot = join(repoRoot, "resources");
+const resourcesV2Root = join(repoRoot, "resourcesv2");
 
 function getContentType(path) {
   const ext = extname(path).toLowerCase();
@@ -24,6 +25,8 @@ function getContentType(path) {
       return "image/svg+xml";
     case ".png":
       return "image/png";
+    case ".mp3":
+      return "audio/mpeg";
     default:
       return "application/octet-stream";
   }
@@ -74,6 +77,17 @@ function handleRequest(request) {
     const fullPath = safeJoin(resourcesRoot, relativePath);
 
     // Directory listing support (path ends with /)
+    if (url.pathname.endsWith("/") && existsSync(fullPath) && statSync(fullPath).isDirectory()) {
+      return serveDirectory(fullPath);
+    }
+
+    return serveFile(fullPath);
+  }
+
+  if (url.pathname.startsWith("/resourcesv2/")) {
+    const relativePath = url.pathname.slice("/resourcesv2/".length);
+    const fullPath = safeJoin(resourcesV2Root, relativePath);
+
     if (url.pathname.endsWith("/") && existsSync(fullPath) && statSync(fullPath).isDirectory()) {
       return serveDirectory(fullPath);
     }
