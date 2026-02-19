@@ -28,6 +28,27 @@ The docs UI includes sidebar navigation for markdown files under `docs/`.
 
 ---
 
+## 2026-02-19 17:40 (GMT+11)
+### Summary
+- Reverted wall column index approach — back to exact C++ 2-link chain check.
+
+### Files changed
+- `client/web/app.js`
+
+### What changed
+- The `wallColumnsByX` column index and `isWallColumnBlocking` caused over-blocking on interior
+  walls in the subway map (debug2.png). Players were blocked from moving between sections at
+  heights where the C++ client allows passage.
+- `getWallX` now matches C++ `FootholdTree::get_wall` exactly: checks only the immediate 2
+  chain links (prev/prevprev or next/nextnext) with the `[nextY-50, nextY-1]` blocking window.
+- Map boundary walls are still enforced by `clampXToSideWalls` hard clamp.
+- Removed `wallColumnsByX` from map parsing and map object.
+
+### Validation
+- `bun run ci` ✅
+
+---
+
 ## 2026-02-19 17:15 (GMT+11)
 ### Summary
 - Fixed jump-through-wall bug on tall multi-segment walls (e.g., subway map 103000900).

@@ -198,11 +198,9 @@ Make browser rendering feel fast/snappy by reducing frame time variance, input-t
   - removed generic wall-line intersection fallback (it over-blocked on short/local vertical walls)
   - `resolveWallCollision(...)` now uses foothold-chain blocking checks + map side-wall fallback only
   - keeps C++-style map wall bounds (`map.walls.left/right`) as primary side limits.
-- Fixed jump-through-wall bug on tall multi-segment walls (e.g., subway cars in 103000900):
-  - `getWallX` now uses pre-indexed `wallColumnsByX` to check the full vertical extent of a wall
-    column found via the foothold chain, not just the immediate 60px chain-link segment.
-  - Only activates for walls discovered through the normal foothold chain (prev/prevprev or
-    next/nextnext), so unrelated walls at other X positions are not affected.
+- Wall collision reverted to exact C++ `FootholdTree::get_wall` 2-link chain check after
+  column-index approach caused over-blocking on interior walls (debug2.png). The C++ client
+  also allows jumping past walls at sufficient height — map boundary enforced by side wall clamp.
 - Added stance-aware player touch hitbox sizing (prone/sit vs standing) so collision profile
   better matches rendered posture while preserving swept collision checks.
 - Refined player-hit visual parity:

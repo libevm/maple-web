@@ -3591,23 +3591,7 @@ function parseMapData(raw) {
       y2: Math.max(line.y1, line.y2),
     }));
 
-  // Pre-index wall segments by X — each key maps to an array of {y1, y2}
-  // segments at that X plus total coverage height. Used by getWallX to check
-  // tall wall columns efficiently (avoids jump-through on multi-segment walls)
-  // while correctly ignoring small platform edges.
-  const WALL_COLUMN_MIN_HEIGHT = 100; // px — columns shorter than this use C++-style 2-link only
-  const wallColumnsByX = new Map();
-  for (const wall of wallLines) {
-    const xKey = Math.round(wall.x);
-    let col = wallColumnsByX.get(xKey);
-    if (!col) {
-      col = { segments: [], totalHeight: 0 };
-      wallColumnsByX.set(xKey, col);
-    }
-    const segHeight = Math.abs(wall.y2 - wall.y1);
-    col.segments.push({ y1: wall.y1, y2: wall.y2 });
-    col.totalHeight += segHeight;
-  }
+
 
   const points = [];
   for (const line of footholdLines) {
@@ -3658,7 +3642,7 @@ function parseMapData(raw) {
     footholdLines,
     footholdById,
     wallLines,
-    wallColumnsByX,
+
     walls,
     borders,
     footholdBounds: {
@@ -5150,63 +5134,36 @@ function isBlockingWall(foothold, minY, maxY) {
   return rangesOverlap(foothold.y1, foothold.y2, minY, maxY);
 }
 
-// Check if a tall wall column at wallX blocks the given Y range [minY, maxY].
-// Returns true only for columns with significant total height (>= 100px),
-// matching C++ behavior where small platform edges are naturally ignored at
-// jump height by the 2-link chain check. Tall walls (subway barriers etc.)
-// are checked segment-by-segment so jumping can't bypass them.
-function isWallColumnBlocking(map, wallX, minY, maxY) {
-  const col = map.wallColumnsByX?.get(Math.round(wallX));
-  if (!col || col.totalHeight < 100) return false;
-  const segments = col.segments;
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i];
-    if (seg.y2 >= minY && seg.y1 <= maxY) return true;
-  }
-  return false;
-}
-
+// Exact C++ FootholdTree::get_wall parity — check prev/prevprev (left) or
+// next/nextnext (right) for blocking walls. Only the immediate 2 chain links
+// are checked with the 50px Y window [nextY-50, nextY-1]. Falls back to
+// map side wall bounds when no blocking wall is found in the chain.
 function getWallX(map, current, left, nextY) {
   const minY = Math.floor(nextY) - 50;
   const maxY = Math.floor(nextY) - 1;
 
   if (left) {
     const prev = findFootholdById(map, current.prevId);
+    if (isBlockingWall(prev, minY, maxY)) {
+      return fhLeft(current);
+    }
 
-    if (prev && fhIsWall(prev)) {
-      // Found wall in chain — check the full column at that X (handles tall multi-segment walls)
-      const wallX = prev.x1;
-      if (isWallColumnBlocking(map, wallX, minY, maxY)) {
-        return fhLeft(current);
-      }
-    } else if (prev) {
-      const prevPrev = findFootholdById(map, prev.prevId);
-      if (prevPrev && fhIsWall(prevPrev)) {
-        const wallX = prevPrev.x1;
-        if (isWallColumnBlocking(map, wallX, minY, maxY)) {
-          return fhLeft(prev);
-        }
-      }
+    const prevPrev = prev ? findFootholdById(map, prev.prevId) : null;
+    if (isBlockingWall(prevPrev, minY, maxY)) {
+      return fhLeft(prev);
     }
 
     return map.walls?.left ?? map.bounds.minX;
   }
 
   const next = findFootholdById(map, current.nextId);
+  if (isBlockingWall(next, minY, maxY)) {
+    return fhRight(current);
+  }
 
-  if (next && fhIsWall(next)) {
-    const wallX = next.x1;
-    if (isWallColumnBlocking(map, wallX, minY, maxY)) {
-      return fhRight(current);
-    }
-  } else if (next) {
-    const nextNext = findFootholdById(map, next.nextId);
-    if (nextNext && fhIsWall(nextNext)) {
-      const wallX = nextNext.x1;
-      if (isWallColumnBlocking(map, wallX, minY, maxY)) {
-        return fhRight(next);
-      }
-    }
+  const nextNext = next ? findFootholdById(map, next.nextId) : null;
+  if (isBlockingWall(nextNext, minY, maxY)) {
+    return fhRight(next);
   }
 
   return map.walls?.right ?? map.bounds.maxX;
