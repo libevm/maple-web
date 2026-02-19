@@ -2075,7 +2075,7 @@ function updateLifeAnimations(dtMs) {
         ph.hforce = state.kbDir * kbForce;
 
         // Run normal physics — friction/gravity handle deceleration naturally
-        mobPhysicsStep(map, ph, false);
+        mobPhysicsUpdate(map, ph, false, 1 / PHYS_TPS);
 
         // Keep hit1 stance
         if (state.stance !== "hit1" && anim?.stances?.["hit1"]) {
