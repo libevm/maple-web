@@ -3432,8 +3432,9 @@ function drawNpcDialogue() {
   // Box height: fit portrait, text, and options
   const portraitH = npcImg ? Math.min(140, npcImg.height) : 0;
   const contentH = Math.max(textH + optionsH + padding, portraitH + 8);
-  const footerH = 30;
-  const boxH = headerH + contentH + padding + footerH;
+  const footerH = 36;
+  const footerGap = 8;
+  const boxH = headerH + contentH + padding + footerGap + footerH;
 
   const boxX = Math.round((canvasEl.width - boxW) / 2);
   const boxY = Math.round((canvasEl.height - boxH) / 2);
