@@ -41,13 +41,16 @@
 - This includes: new physics modes, constant tuning, foothold chain logic, jump mechanics,
   rope/ladder changes, mob patrol behavior, and swim physics.
 
-## Client-Server State Documentation
-- `.memory/client-server.md` documents all character state for server persistence:
-  identity, stats, location, equipment, inventory, keybinds, settings, and achievements.
-- **Any change to player state fields, new runtime.player properties, inventory data model,
-  equipment slots, keybind actions, settings fields, or persistence logic MUST update `client-server.md`.**
-- This includes: new stat fields, save/load functions, localStorage keys, default values,
-  schema version changes, and achievement tracking additions.
+## Client-Server Architecture Documentation
+- `.memory/client-server.md` documents the complete client-server architecture:
+  session/auth model, character state schema, WebSocket real-time protocol,
+  V2 map set with dependencies, and resource pipeline.
+- **Any change to player state fields, session handling, WebSocket messages,
+  REST endpoints, persistence logic, V2 map list, or online/offline mode
+  switching MUST update `client-server.md`.**
+- This includes: new stat fields, save/load functions, new WS message types,
+  room model changes, auth flow changes, V2 resource additions, and
+  default value changes.
 
 ## Inventory & Equipment Documentation
 - `.memory/inventory-system.md` documents inventory tabs, slots, drag-drop, ground drops, loot.

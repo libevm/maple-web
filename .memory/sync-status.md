@@ -1,6 +1,6 @@
 # .memory Sync Status
 
-Last synced: 2026-02-20T10:00:00+11:00
+Last synced: 2026-02-20T11:00:00+11:00
 Status: ✅ Synced
 
 ## Current authoritative memory files
@@ -12,14 +12,14 @@ Status: ✅ Synced
 | `physics-units.md` | Physics constant units and tick-rate conversion reference |
 | `inventory-system.md` | Inventory tabs, slot layout, drag-drop, ground drops, loot, item icons |
 | `equipment-system.md` | Equipment window, equip/unequip flow, dynamic character sprite rendering |
-| `client-server.md` | **All character state for server persistence**: identity, stats, location, equipment, inventory, keybinds, settings, achievements — with TypeScript schema and defaults |
+| `client-server.md` | **Complete client-server architecture**: session/auth model, character state schema, WebSocket protocol, V2 map set, resource pipeline, implementation order |
 | `game-design.md` | High-level game design notes and feature goals |
-| `tech-stack.md` | Technology choices, tooling, build system |
+| `tech-stack.md` | Technology choices, tooling, build system (note: partially stale — actual stack is vanilla JS + raw Bun.serve, not Fastify/Vite) |
 | `implementation-plan.md` | Detailed implementation plan and task breakdown |
 | `cpp-port-architecture-snapshot.md` | C++ reference client architecture snapshot (read-only reference) |
 
 ## Codebase Metrics Snapshot
-- `client/web/app.js`: ~10400 lines (single-file debug web client)
+- `client/web/app.js`: ~10,400 lines (single-file debug web client)
 - Latest git: see `git log --oneline -1` on `origin/main`
 - CI: `bun run ci` ✅
 
@@ -28,39 +28,46 @@ Status: ✅ Synced
 - `bun run client:online` — client + API proxy to game server (default `http://127.0.0.1:5200`)
 - `bun run client:web` — legacy alias for `client:offline`
 
-## Recent Changes (this sync pass)
+## Key Architecture Decisions (this session)
 
-### Client-server state doc (2026-02-20, new)
-- Created `.memory/client-server.md` with all 8 character state groups
-- TypeScript `CharacterSave` interface with full schema
-- Persistence status table: keybinds + settings in localStorage, everything else not yet persisted
-- C++ reference mapping (StatsEntry, LookEntry, Inventory, MapleStat)
-- Default values documented for all fields
+### Session model
+- Session ID = random UUID in localStorage (`mapleweb.session`), primary key for all server state
+- Character name first-come-first-serve, immutable once claimed
+- Auth optional (Phase 2): passphrase-based recovery, no email/OAuth
 
-### Persistent browser Cache API (2026-02-20, 6628fa3)
-- `cachedFetch()` wraps all resource fetches with Cache API (`maple-resources-v1`)
-- `fetchJson()` and `preloadLoadingScreenAssets()` use `cachedFetch()`
+### WebSocket protocol
+- 50ms position updates while moving
+- Immediate action events: attack, chat, face, sit, prone, climb, equip change, drop, loot, level up, damage, die, respawn, jump, portal
+- Map-scoped rooms: players only receive updates for their current map
+- Global broadcasts: level up celebrations, achievements, announcements, player count
+- JSON format for readability (v1)
 
-### Mob name only after attack (2026-02-20, 51c476b)
-- `nameVisible` flag on mob state, set `true` on any attack
+### Persistence split
+- Server-persisted (6 groups): identity, stats, location, equipment, inventory, achievements
+- Client-only localStorage (2 groups): keybinds, settings
 
-### Player position init after map load (2026-02-20, f8ea031)
-- Spawn portal, player position, camera init moved after `preloadMapAssets()`
+### V2 map set
+- 21 maps: Henesys Townstreet + 3 Shumi JQs (9 maps) + 3 John JQs (6 maps) + Forest of Patience (2) + Breath of Lava (2)
+- Dependencies: 5 BGMs, 7 mobs, 11 NPCs, 6 tile sets, 10 obj sets, 6 bg sets
+- Default spawn: `100000001` (Henesys Townstreet)
 
-### Loading screen overhaul (2026-02-20, 7e6aa68→39ec405)
-- Animated Orange Mushroom from `resourcesv2/mob/orange-mushroom/`
-- Login BGM from `resourcesv2/sound/login.mp3` (mono, 48kbps, 2.2MB)
-- Modern flat style: pill bar, system font, spinner fallback
-- Verbose status + percentage label
+### Default map change
+- V2 default map: `100000001` (Henesys Townstreet), was `104040000`
 
-### HUD improvements (2026-02-20, f6aed48→abf587b)
-- Button tooltips on hover, hidden during loading
-- UI toggles (E/I/K) work when mouse over game windows
-- Sound debounce (100ms per sound name)
-- Keyboard Mappings keybind (K)
+## Recent Changes
 
-### Previous sync entries
-(All entries from prior syncs remain valid — see git log for full history)
+### client-server.md complete rewrite (2026-02-20)
+- Session/auth model with passphrase recovery plan
+- SQLite schema for characters + name reservation
+- Full WebSocket message protocol (24 client→server types, 19 server→client types)
+- V2 map list with all dependencies enumerated
+- 10-step implementation order
+- Removed keybinds/settings from server persistence
+
+### client:offline and client:online commands (2026-02-20, 02e6c26)
+- `serve-client-offline.mjs` (standalone)
+- `serve-client-online.mjs` (API proxy + `__MAPLE_ONLINE__` injection)
+- `serve-client-web.mjs` → alias for offline
 
 ## Key Data Structures
 
@@ -71,5 +78,6 @@ lifeRuntimeState[i].nameVisible            // false until attacked
 RESOURCE_CACHE_NAME = "maple-resources-v1" // Cache API key
 SETTINGS_CACHE_KEY = "mapleweb.settings.v1"
 KEYBINDS_STORAGE_KEY = "mapleweb.keybinds.v1"
+// Future: SESSION_KEY = "mapleweb.session"
 // Tooltip z-index: 99990 | Cursor z-index: 99999
 ```
