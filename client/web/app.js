@@ -4472,12 +4472,8 @@ function getFaceFrameDelayMs(expression, expressionFrameIndex) {
 }
 
 function pickPlayerHitFaceExpression() {
-  const candidates = ["pain", "hit", "troubled", "stunned", "bewildered"];
-  for (const expression of candidates) {
-    if (getFaceExpressionFrames(expression).length > 0) {
-      return expression;
-    }
-  }
+  if (getFaceExpressionFrames("pain").length > 0) return "pain";
+  if (getFaceExpressionFrames("hit").length > 0) return "hit";
   return "default";
 }
 
