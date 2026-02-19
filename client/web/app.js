@@ -6094,12 +6094,19 @@ function updateObjectAnimations(dtMs) {
       if (state.timerMs >= frameDelay) {
         state.timerMs -= frameDelay;
         state.frameIndex = (state.frameIndex + 1) % obj.frameCount;
-        // Snap to 0 when entering a "start invisible" frame (a0 === 0).
-        // This creates a clean cooldown gap before the fade-in ramp.
-        // All other transitions carry over smoothly.
+        // Determine opacity for the new frame:
+        // - start === 0: snap to 0 (cooldown gap before fade-in)
+        // - start !== end (animated opacity): carry over for smooth transition
+        // - start === end (no opacity animation): snap to start value
+        //   (prevents carryover from a fading frame making static frames invisible)
         const nextOpc = obj.frameOpacities?.[state.frameIndex];
-        if (nextOpc && nextOpc.start === 0) {
-          state.opacity = 0;
+        if (nextOpc) {
+          if (nextOpc.start === 0) {
+            state.opacity = 0;
+          } else if (nextOpc.start === nextOpc.end) {
+            state.opacity = nextOpc.start;
+          }
+          // else: animated opacity — carry over smoothly
         }
       }
     }
@@ -6274,7 +6281,6 @@ function updateMobTouchCollisions() {
   if (runtime.debug.mouseFly) return;
 
   const player = runtime.player;
-  if (player.climbing) return;
   const nowMs = performance.now();
   if (nowMs < player.trapInvincibleUntil) return;
 
@@ -6303,7 +6309,6 @@ function updateTrapHazardCollisions() {
   if (runtime.debug.mouseFly) return;
 
   const player = runtime.player;
-  if (player.climbing) return;
   const nowMs = performance.now();
   if (nowMs < player.trapInvincibleUntil) return;
 
