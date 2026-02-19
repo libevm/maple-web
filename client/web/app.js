@@ -4964,8 +4964,8 @@ function buildMapAssetPreloadTasks(map) {
           }
         }
       }
-      // Preload stand + move frame images eagerly, then clear basedata to free memory
-      for (const stanceName of ["stand", "move"]) {
+      // Preload common stance frame images eagerly, then clear basedata to free memory
+      for (const stanceName of ["stand", "move", "hit1", "die1"]) {
         const stance = anim.stances[stanceName];
         if (!stance) continue;
         for (const frame of stance.frames) {
@@ -4986,6 +4986,14 @@ function buildMapAssetPreloadTasks(map) {
         }
       }
       return anim;
+    });
+  }
+
+  // Preload mob sound file if map has mobs (22MB JSON — fetch early to avoid lag on first hit)
+  const hasMobs = (map.lifeEntries ?? []).some(l => l.type === "m");
+  if (hasMobs) {
+    addPreloadTask(taskMap, "sound:Mob.img", async () => {
+      try { await fetchJson(soundPathFromName("Mob.img")); } catch {}
     });
   }
 
