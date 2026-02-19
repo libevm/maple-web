@@ -295,6 +295,8 @@ const runtime = {
   keybinds: {
     attack: "KeyC",
     jump: "Space",
+    equip: "KeyE",
+    inventory: "KeyI",
     face1: "Digit1",
     face2: "Digit2",
     face3: "Digit3",
@@ -398,14 +400,16 @@ const runtime = {
 
 // ─── In-game UI Windows (Equipment + Inventory) ─────────────────────────────
 
-/**
- * Equipment slot layout matching MapleStory's equip window.
- * Each slot has a type (matches item category prefix) and grid position.
- */
-const EQUIP_SLOT_TYPES = [
+const equipWindowEl = document.getElementById("equip-window");
+const inventoryWindowEl = document.getElementById("inventory-window");
+const equipGridEl = document.getElementById("equip-grid");
+const invGridEl = document.getElementById("inv-grid");
+const uiTooltipEl = document.getElementById("ui-tooltip");
+
+const EQUIP_SLOT_LAYOUT = [
   { type: "Cap",       label: "Hat",     col: 1, row: 0 },
   { type: "Accessory", label: "Face",    col: 0, row: 1 },
-  { type: "Accessory", label: "Eye",     col: 2, row: 1 },
+  { type: "Accessory2",label: "Eye",     col: 2, row: 1 },
   { type: "Coat",      label: "Top",     col: 1, row: 1 },
   { type: "Pants",     label: "Bottom",  col: 1, row: 2 },
   { type: "Shoes",     label: "Shoes",   col: 1, row: 3 },
@@ -415,74 +419,27 @@ const EQUIP_SLOT_TYPES = [
   { type: "Weapon",    label: "Weapon",  col: 2, row: 3 },
 ];
 
-const UI_SLOT_SIZE     = 36;   // px per inventory slot
-const UI_SLOT_PAD      = 2;    // px between slots
-const UI_WIN_PAD       = 8;    // window inner padding
-const UI_TITLEBAR_H    = 22;   // height of draggable title bar
-const UI_CLOSE_BTN_SIZE = 16;
-const INV_COLS         = 4;
-const INV_ROWS         = 6;
-const UI_BG_COLOR      = "rgba(10, 15, 30, 0.92)";
-const UI_BORDER_COLOR  = "rgba(120, 140, 180, 0.6)";
-const UI_TITLE_COLOR   = "#c4b998";
-const UI_SLOT_BG       = "rgba(30, 36, 54, 0.85)";
-const UI_SLOT_BORDER   = "rgba(80, 90, 120, 0.5)";
-const UI_TOOLTIP_BG    = "rgba(10, 15, 30, 0.95)";
+const INV_COLS = 4;
+const INV_ROWS = 6;
 
-const uiWindows = {
-  equip: {
-    visible: false,
-    title: "Equipment",
-    x: 50,
-    y: 100,
-    dragging: false,
-    dragOffX: 0,
-    dragOffY: 0,
-  },
-  inventory: {
-    visible: false,
-    title: "Inventory",
-    x: 300,
-    y: 100,
-    dragging: false,
-    dragOffX: 0,
-    dragOffY: 0,
-  },
-};
-
-/** Player equipment slots — maps category to { id, name, iconKey } */
+/** Player equipment slots — maps category to { id, name, iconSrc } */
 const playerEquipped = new Map();
 
-/** Player inventory — array of { id, name, category, qty, iconKey } */
+/** Player inventory — array of { id, name, qty, iconSrc } */
 const playerInventory = [];
 
-/** Tooltip state */
-const uiTooltip = { text: "", x: 0, y: 0, visible: false };
+/** Icon data URI cache */
+const iconDataUriCache = new Map();
 
-/** Icon image cache (separate from game imageCache to keep clean) */
-const iconImageCache = new Map();
-
-function iconImageForKey(key) {
-  return iconImageCache.get(key) ?? null;
+function getIconDataUri(key) {
+  return iconDataUriCache.get(key) ?? null;
 }
 
-function requestIconImage(key, basedata, width, height) {
-  if (iconImageCache.has(key)) return;
-  const img = new Image();
-  img.onload = () => iconImageCache.set(key, img);
-  img.onerror = () => iconImageCache.set(key, null);
-  img.src = `data:image/png;base64,${basedata}`;
-  iconImageCache.set(key, null); // placeholder while loading
-}
-
-/**
- * Load icon for an equipment item from Character.wz
- */
 function loadEquipIcon(equipId, category) {
   const padded = String(equipId).padStart(8, "0");
   const key = `equip-icon:${equipId}`;
-  if (iconImageCache.has(key)) return key;
-
+  if (iconDataUriCache.has(key)) return key;
+  iconDataUriCache.set(key, null);
   const path = `/resources/Character.wz/${category}/${padded}.img.json`;
   fetchJson(path).then((json) => {
     if (!json?.$$) return;
@@ -490,20 +447,17 @@ function loadEquipIcon(equipId, category) {
     if (!infoNode?.$$) return;
     const iconNode = infoNode.$$.find(c => c.$canvas === "icon" || c.$canvas === "iconRaw");
     if (iconNode?.basedata) {
-      requestIconImage(key, iconNode.basedata, iconNode.width, iconNode.height);
+      iconDataUriCache.set(key, `data:image/png;base64,${iconNode.basedata}`);
+      refreshUIWindows();
     }
   }).catch(() => {});
-  iconImageCache.set(key, null); // placeholder
   return key;
 }
 
-/**
- * Load icon for a consumable/etc item from Item.wz
- */
 function loadItemIcon(itemId) {
   const key = `item-icon:${itemId}`;
-  if (iconImageCache.has(key)) return key;
-
+  if (iconDataUriCache.has(key)) return key;
+  iconDataUriCache.set(key, null);
   const idStr = String(itemId).padStart(8, "0");
   const prefix = idStr.substring(0, 4);
   let wzPath;
@@ -511,10 +465,7 @@ function loadItemIcon(itemId) {
     wzPath = `/resources/Item.wz/Consume/${prefix}.img.json`;
   } else if (itemId >= 4000000 && itemId < 5000000) {
     wzPath = `/resources/Item.wz/Etc/${prefix}.img.json`;
-  } else {
-    return key;
-  }
-
+  } else { return key; }
   fetchJson(wzPath).then((json) => {
     if (!json?.$$) return;
     const itemNode = json.$$.find(c => c.$imgdir === idStr);
@@ -523,34 +474,11 @@ function loadItemIcon(itemId) {
     if (!infoNode?.$$) return;
     const iconNode = infoNode.$$.find(c => c.$canvas === "icon" || c.$canvas === "iconRaw");
     if (iconNode?.basedata) {
-      requestIconImage(key, iconNode.basedata, iconNode.width, iconNode.height);
+      iconDataUriCache.set(key, `data:image/png;base64,${iconNode.basedata}`);
+      refreshUIWindows();
     }
   }).catch(() => {});
-  iconImageCache.set(key, null); // placeholder
   return key;
-}
-
-/** Get item name from String.wz data (cached in jsonCache) */
-async function loadItemName(itemId) {
-  const idStr = String(itemId);
-  if (itemId >= 1000000 && itemId < 2000000) {
-    // Equipment — look in Eqp.img
-    try {
-      const json = await fetchJson("/resources/String.wz/Eqp.img.json");
-      return findStringName(json, idStr);
-    } catch { return null; }
-  } else if (itemId >= 2000000 && itemId < 3000000) {
-    try {
-      const json = await fetchJson("/resources/String.wz/Consume.img.json");
-      return findStringName(json, idStr);
-    } catch { return null; }
-  } else if (itemId >= 4000000 && itemId < 5000000) {
-    try {
-      const json = await fetchJson("/resources/String.wz/Etc.img.json");
-      return findStringName(json, idStr);
-    } catch { return null; }
-  }
-  return null;
 }
 
 function findStringName(node, targetId) {
@@ -566,7 +494,23 @@ function findStringName(node, targetId) {
   return null;
 }
 
-/** Initialize player equipment from DEFAULT_EQUIPS */
+async function loadItemName(itemId) {
+  const idStr = String(itemId);
+  try {
+    if (itemId >= 1000000 && itemId < 2000000) {
+      const json = await fetchJson("/resources/String.wz/Eqp.img.json");
+      return findStringName(json, idStr);
+    } else if (itemId >= 2000000 && itemId < 3000000) {
+      const json = await fetchJson("/resources/String.wz/Consume.img.json");
+      return findStringName(json, idStr);
+    } else if (itemId >= 4000000 && itemId < 5000000) {
+      const json = await fetchJson("/resources/String.wz/Etc.img.json");
+      return findStringName(json, idStr);
+    }
+  } catch {}
+  return null;
+}
+
 function initPlayerEquipment() {
   playerEquipped.clear();
   for (const eq of DEFAULT_EQUIPS) {
@@ -574,311 +518,168 @@ function initPlayerEquipment() {
     playerEquipped.set(eq.category, { id: eq.id, name: "", iconKey });
     loadItemName(eq.id).then(name => {
       const entry = playerEquipped.get(eq.category);
-      if (entry) entry.name = name || eq.category;
+      if (entry) { entry.name = name || eq.category; refreshUIWindows(); }
     });
   }
 }
 
-/** Give player some starter inventory items */
 function initPlayerInventory() {
   playerInventory.length = 0;
   const starterItems = [
-    { id: 2000000, qty: 30 },  // Red Potion
-    { id: 2000001, qty: 15 },  // Orange Potion
-    { id: 2000002, qty: 5 },   // White Potion
-    { id: 2010000, qty: 10 },  // Apple
-    { id: 4000000, qty: 8 },   // Blue Snail Shell
-    { id: 4000001, qty: 3 },   // Orange Mushroom Cap
+    { id: 2000000, qty: 30 },
+    { id: 2000001, qty: 15 },
+    { id: 2000002, qty: 5 },
+    { id: 2010000, qty: 10 },
+    { id: 4000000, qty: 8 },
+    { id: 4000001, qty: 3 },
   ];
   for (const item of starterItems) {
     const iconKey = loadItemIcon(item.id);
-    playerInventory.push({
-      id: item.id,
-      name: "...",
-      qty: item.qty,
-      iconKey,
-    });
+    playerInventory.push({ id: item.id, name: "...", qty: item.qty, iconKey });
     loadItemName(item.id).then(name => {
       const entry = playerInventory.find(e => e.id === item.id);
-      if (entry) entry.name = name || `Item ${item.id}`;
+      if (entry) { entry.name = name || `Item ${item.id}`; refreshUIWindows(); }
     });
   }
 }
 
-function uiWindowWidth(win) {
-  if (win === uiWindows.equip) {
-    return UI_WIN_PAD * 2 + 3 * (UI_SLOT_SIZE + UI_SLOT_PAD) - UI_SLOT_PAD;
-  }
-  return UI_WIN_PAD * 2 + INV_COLS * (UI_SLOT_SIZE + UI_SLOT_PAD) - UI_SLOT_PAD;
-}
-
-function uiWindowHeight(win) {
-  if (win === uiWindows.equip) {
-    return UI_TITLEBAR_H + UI_WIN_PAD * 2 + 4 * (UI_SLOT_SIZE + UI_SLOT_PAD) - UI_SLOT_PAD;
-  }
-  return UI_TITLEBAR_H + UI_WIN_PAD * 2 + INV_ROWS * (UI_SLOT_SIZE + UI_SLOT_PAD) - UI_SLOT_PAD;
-}
-
-function drawUISlot(x, y, icon, label, qty) {
-  // Slot background
-  ctx.fillStyle = UI_SLOT_BG;
-  ctx.fillRect(x, y, UI_SLOT_SIZE, UI_SLOT_SIZE);
-  ctx.strokeStyle = UI_SLOT_BORDER;
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x + 0.5, y + 0.5, UI_SLOT_SIZE - 1, UI_SLOT_SIZE - 1);
-
-  if (icon && icon.complete && icon.naturalWidth > 0) {
-    const iw = icon.naturalWidth;
-    const ih = icon.naturalHeight;
-    const scale = Math.min((UI_SLOT_SIZE - 4) / iw, (UI_SLOT_SIZE - 4) / ih, 1);
-    const dw = Math.round(iw * scale);
-    const dh = Math.round(ih * scale);
-    ctx.drawImage(icon, x + Math.round((UI_SLOT_SIZE - dw) / 2), y + Math.round((UI_SLOT_SIZE - dh) / 2), dw, dh);
+function buildSlotEl(icon, label, qty, tooltipText) {
+  const slot = document.createElement("div");
+  slot.className = icon ? "item-slot" : "item-slot empty";
+  if (icon) {
+    const img = document.createElement("img");
+    img.src = icon;
+    img.draggable = false;
+    slot.appendChild(img);
   } else if (label) {
-    ctx.fillStyle = "rgba(80, 90, 120, 0.4)";
-    ctx.font = "9px Inter, system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(label, x + UI_SLOT_SIZE / 2, y + UI_SLOT_SIZE / 2);
+    const lbl = document.createElement("span");
+    lbl.className = "slot-label";
+    lbl.textContent = label;
+    slot.appendChild(lbl);
   }
+  if (qty > 1) {
+    const qtyEl = document.createElement("span");
+    qtyEl.className = "slot-qty";
+    qtyEl.textContent = String(qty);
+    slot.appendChild(qtyEl);
+  }
+  if (tooltipText) {
+    slot.addEventListener("mouseenter", (e) => showTooltip(e, tooltipText));
+    slot.addEventListener("mousemove", (e) => moveTooltip(e));
+    slot.addEventListener("mouseleave", hideTooltip);
+  }
+  return slot;
+}
 
-  // Quantity badge
-  if (qty && qty > 1) {
-    ctx.fillStyle = "#fff";
-    ctx.font = "bold 10px Inter, system-ui, sans-serif";
-    ctx.textAlign = "right";
-    ctx.textBaseline = "bottom";
-    ctx.fillText(String(qty), x + UI_SLOT_SIZE - 2, y + UI_SLOT_SIZE - 1);
+function refreshUIWindows() {
+  refreshEquipGrid();
+  refreshInvGrid();
+}
+
+function refreshEquipGrid() {
+  if (!equipGridEl) return;
+  equipGridEl.innerHTML = "";
+  // Build 3×4 grid with slots placed by col/row
+  const cells = new Array(12).fill(null);
+  for (const slot of EQUIP_SLOT_LAYOUT) {
+    const idx = slot.row * 3 + slot.col;
+    const equipped = playerEquipped.get(slot.type);
+    const iconUri = equipped ? getIconDataUri(equipped.iconKey) : null;
+    const tooltip = equipped?.name || null;
+    cells[idx] = buildSlotEl(iconUri, slot.label, 0, tooltip);
+  }
+  for (let i = 0; i < 12; i++) {
+    equipGridEl.appendChild(cells[i] || buildSlotEl(null, null, 0, null));
   }
 }
 
-function drawUIWindow(win, contentDrawFn) {
-  const w = uiWindowWidth(win);
-  const h = uiWindowHeight(win);
-
-  // Clamp within canvas
-  win.x = Math.max(0, Math.min(gameViewWidth() - w, win.x));
-  win.y = Math.max(0, Math.min(gameViewHeight() - h, win.y));
-
-  // Window background
-  ctx.fillStyle = UI_BG_COLOR;
-  ctx.fillRect(win.x, win.y, w, h);
-  ctx.strokeStyle = UI_BORDER_COLOR;
-  ctx.lineWidth = 1;
-  ctx.strokeRect(win.x + 0.5, win.y + 0.5, w - 1, h - 1);
-
-  // Title bar
-  ctx.fillStyle = "rgba(30, 40, 60, 0.9)";
-  ctx.fillRect(win.x, win.y, w, UI_TITLEBAR_H);
-  ctx.strokeStyle = UI_BORDER_COLOR;
-  ctx.strokeRect(win.x + 0.5, win.y + 0.5, w - 1, UI_TITLEBAR_H - 1);
-
-  // Title text
-  ctx.fillStyle = UI_TITLE_COLOR;
-  ctx.font = "bold 11px Inter, system-ui, sans-serif";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.fillText(win.title, win.x + 6, win.y + UI_TITLEBAR_H / 2);
-
-  // Close button (×)
-  const cbx = win.x + w - UI_CLOSE_BTN_SIZE - 3;
-  const cby = win.y + (UI_TITLEBAR_H - UI_CLOSE_BTN_SIZE) / 2;
-  ctx.fillStyle = "rgba(200, 80, 80, 0.7)";
-  ctx.fillRect(cbx, cby, UI_CLOSE_BTN_SIZE, UI_CLOSE_BTN_SIZE);
-  ctx.fillStyle = "#fff";
-  ctx.font = "bold 11px sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("×", cbx + UI_CLOSE_BTN_SIZE / 2, cby + UI_CLOSE_BTN_SIZE / 2);
-
-  // Content area
-  const cx = win.x + UI_WIN_PAD;
-  const cy = win.y + UI_TITLEBAR_H + UI_WIN_PAD;
-  contentDrawFn(cx, cy);
-}
-
-function drawEquipWindow() {
-  const win = uiWindows.equip;
-  if (!win.visible) return;
-
-  drawUIWindow(win, (cx, cy) => {
-    for (const slot of EQUIP_SLOT_TYPES) {
-      const sx = cx + slot.col * (UI_SLOT_SIZE + UI_SLOT_PAD);
-      const sy = cy + slot.row * (UI_SLOT_SIZE + UI_SLOT_PAD);
-      const equipped = playerEquipped.get(slot.type);
-      const icon = equipped ? iconImageForKey(equipped.iconKey) : null;
-      drawUISlot(sx, sy, icon, slot.label, 0);
-    }
-  });
-}
-
-function drawInventoryWindow() {
-  const win = uiWindows.inventory;
-  if (!win.visible) return;
-
-  drawUIWindow(win, (cx, cy) => {
-    // Draw all inventory grid slots
-    for (let row = 0; row < INV_ROWS; row++) {
-      for (let col = 0; col < INV_COLS; col++) {
-        const idx = row * INV_COLS + col;
-        const sx = cx + col * (UI_SLOT_SIZE + UI_SLOT_PAD);
-        const sy = cy + row * (UI_SLOT_SIZE + UI_SLOT_PAD);
-        const item = playerInventory[idx] ?? null;
-        const icon = item ? iconImageForKey(item.iconKey) : null;
-        drawUISlot(sx, sy, icon, null, item?.qty ?? 0);
-      }
-    }
-  });
-}
-
-function drawUITooltip() {
-  if (!uiTooltip.visible || !uiTooltip.text) return;
-  ctx.save();
-  ctx.font = "11px Inter, system-ui, sans-serif";
-  const lines = uiTooltip.text.split("\n");
-  let maxW = 0;
-  for (const line of lines) maxW = Math.max(maxW, ctx.measureText(line).width);
-  const pw = maxW + 12;
-  const ph = lines.length * 14 + 8;
-  let tx = uiTooltip.x + 12;
-  let ty = uiTooltip.y + 12;
-  if (tx + pw > gameViewWidth()) tx = uiTooltip.x - pw - 4;
-  if (ty + ph > gameViewHeight()) ty = uiTooltip.y - ph - 4;
-  ctx.fillStyle = UI_TOOLTIP_BG;
-  ctx.fillRect(tx, ty, pw, ph);
-  ctx.strokeStyle = UI_BORDER_COLOR;
-  ctx.lineWidth = 1;
-  ctx.strokeRect(tx + 0.5, ty + 0.5, pw - 1, ph - 1);
-  ctx.fillStyle = "#e8e0d0";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], tx + 6, ty + 4 + i * 14);
+function refreshInvGrid() {
+  if (!invGridEl) return;
+  invGridEl.innerHTML = "";
+  const totalSlots = INV_COLS * INV_ROWS;
+  for (let i = 0; i < totalSlots; i++) {
+    const item = playerInventory[i] ?? null;
+    const iconUri = item ? getIconDataUri(item.iconKey) : null;
+    const tooltip = item ? `${item.name}\nQty: ${item.qty}` : null;
+    invGridEl.appendChild(buildSlotEl(iconUri, null, item?.qty ?? 0, tooltip));
   }
-  ctx.restore();
 }
 
-function drawGameUIWindows() {
-  drawEquipWindow();
-  drawInventoryWindow();
-  drawUITooltip();
+function showTooltip(e, text) {
+  if (!uiTooltipEl) return;
+  uiTooltipEl.textContent = text;
+  uiTooltipEl.classList.remove("hidden");
+  moveTooltip(e);
 }
 
-/** Check if screen point is inside a window. Returns window key or null. */
-function uiWindowHitTest(sx, sy) {
-  // Check windows in reverse draw order (inventory on top)
-  for (const key of ["inventory", "equip"]) {
-    const win = uiWindows[key];
-    if (!win.visible) continue;
-    const w = uiWindowWidth(win);
-    const h = uiWindowHeight(win);
-    if (sx >= win.x && sx <= win.x + w && sy >= win.y && sy <= win.y + h) {
-      return key;
-    }
-  }
-  return null;
+function moveTooltip(e) {
+  if (!uiTooltipEl) return;
+  const wrapper = canvasEl.parentElement;
+  const wr = wrapper.getBoundingClientRect();
+  let tx = e.clientX - wr.left + 14;
+  let ty = e.clientY - wr.top + 14;
+  if (tx + 160 > wr.width) tx = e.clientX - wr.left - 160;
+  if (ty + 40 > wr.height) ty = e.clientY - wr.top - 40;
+  uiTooltipEl.style.left = `${tx}px`;
+  uiTooltipEl.style.top = `${ty}px`;
 }
 
-/** Handle pointer down on UI windows. Returns true if consumed. */
-function uiWindowPointerDown(sx, sy) {
-  for (const key of ["inventory", "equip"]) {
-    const win = uiWindows[key];
-    if (!win.visible) continue;
-    const w = uiWindowWidth(win);
-    const h = uiWindowHeight(win);
-    if (sx < win.x || sx > win.x + w || sy < win.y || sy > win.y + h) continue;
-
-    // Close button
-    const cbx = win.x + w - UI_CLOSE_BTN_SIZE - 3;
-    const cby = win.y + (UI_TITLEBAR_H - UI_CLOSE_BTN_SIZE) / 2;
-    if (sx >= cbx && sx <= cbx + UI_CLOSE_BTN_SIZE && sy >= cby && sy <= cby + UI_CLOSE_BTN_SIZE) {
-      win.visible = false;
-      return true;
-    }
-
-    // Title bar drag
-    if (sy >= win.y && sy <= win.y + UI_TITLEBAR_H) {
-      win.dragging = true;
-      win.dragOffX = sx - win.x;
-      win.dragOffY = sy - win.y;
-      return true;
-    }
-
-    // Click inside window — consume (don't pass to game)
-    return true;
-  }
-  return false;
-}
-
-/** Handle pointer move for drag */
-function uiWindowPointerMove(sx, sy) {
-  let consumed = false;
-  for (const key of ["inventory", "equip"]) {
-    const win = uiWindows[key];
-    if (win.dragging) {
-      win.x = sx - win.dragOffX;
-      win.y = sy - win.dragOffY;
-      consumed = true;
-    }
-  }
-
-  // Tooltip: check if hovering over a slot
-  uiTooltip.visible = false;
-  for (const key of ["inventory", "equip"]) {
-    const win = uiWindows[key];
-    if (!win.visible) continue;
-    const w = uiWindowWidth(win);
-    const h = uiWindowHeight(win);
-    if (sx < win.x || sx > win.x + w || sy < win.y || sy > win.y + h) continue;
-
-    const cx = win.x + UI_WIN_PAD;
-    const cy = win.y + UI_TITLEBAR_H + UI_WIN_PAD;
-
-    if (key === "equip") {
-      for (const slot of EQUIP_SLOT_TYPES) {
-        const slotX = cx + slot.col * (UI_SLOT_SIZE + UI_SLOT_PAD);
-        const slotY = cy + slot.row * (UI_SLOT_SIZE + UI_SLOT_PAD);
-        if (sx >= slotX && sx < slotX + UI_SLOT_SIZE && sy >= slotY && sy < slotY + UI_SLOT_SIZE) {
-          const equipped = playerEquipped.get(slot.type);
-          if (equipped?.name) {
-            uiTooltip.text = equipped.name;
-            uiTooltip.x = sx;
-            uiTooltip.y = sy;
-            uiTooltip.visible = true;
-          }
-          break;
-        }
-      }
-    } else {
-      const relX = sx - cx;
-      const relY = sy - cy;
-      const col = Math.floor(relX / (UI_SLOT_SIZE + UI_SLOT_PAD));
-      const row = Math.floor(relY / (UI_SLOT_SIZE + UI_SLOT_PAD));
-      if (col >= 0 && col < INV_COLS && row >= 0 && row < INV_ROWS) {
-        const idx = row * INV_COLS + col;
-        const item = playerInventory[idx];
-        if (item?.name) {
-          uiTooltip.text = `${item.name}\nQty: ${item.qty}`;
-          uiTooltip.x = sx;
-          uiTooltip.y = sy;
-          uiTooltip.visible = true;
-        }
-      }
-    }
-  }
-
-  return consumed;
-}
-
-/** Handle pointer up — stop dragging */
-function uiWindowPointerUp() {
-  for (const key of ["inventory", "equip"]) {
-    uiWindows[key].dragging = false;
-  }
+function hideTooltip() {
+  if (uiTooltipEl) uiTooltipEl.classList.add("hidden");
 }
 
 function toggleUIWindow(key) {
-  uiWindows[key].visible = !uiWindows[key].visible;
+  const el = key === "equip" ? equipWindowEl : inventoryWindowEl;
+  if (!el) return;
+  const isHidden = el.classList.contains("hidden");
+  el.classList.toggle("hidden");
+  if (isHidden) refreshUIWindows();
+}
+
+function isUIWindowVisible(key) {
+  const el = key === "equip" ? equipWindowEl : inventoryWindowEl;
+  return el && !el.classList.contains("hidden");
+}
+
+// ── Dragging ──
+let _dragWin = null;
+let _dragOffX = 0;
+let _dragOffY = 0;
+
+function initUIWindowDrag() {
+  for (const titlebar of document.querySelectorAll(".game-window-titlebar")) {
+    titlebar.addEventListener("pointerdown", (e) => {
+      const winId = titlebar.dataset.window;
+      const winEl = winId === "equip" ? equipWindowEl : inventoryWindowEl;
+      if (!winEl) return;
+      e.preventDefault();
+      _dragWin = winEl;
+      const wr = canvasEl.parentElement.getBoundingClientRect();
+      _dragOffX = e.clientX - winEl.offsetLeft - wr.left;
+      _dragOffY = e.clientY - winEl.offsetTop - wr.top;
+    });
+  }
+
+  for (const closeBtn of document.querySelectorAll(".game-window-close")) {
+    closeBtn.addEventListener("click", () => {
+      const key = closeBtn.dataset.close;
+      const el = key === "equip" ? equipWindowEl : inventoryWindowEl;
+      if (el) el.classList.add("hidden");
+    });
+  }
+
+  window.addEventListener("pointermove", (e) => {
+    if (!_dragWin) return;
+    const wr = canvasEl.parentElement.getBoundingClientRect();
+    let nx = e.clientX - wr.left - _dragOffX;
+    let ny = e.clientY - wr.top - _dragOffY;
+    nx = Math.max(0, Math.min(wr.width - _dragWin.offsetWidth, nx));
+    ny = Math.max(0, Math.min(wr.height - _dragWin.offsetHeight, ny));
+    _dragWin.style.left = `${nx}px`;
+    _dragWin.style.top = `${ny}px`;
+  });
+
+  window.addEventListener("pointerup", () => { _dragWin = null; });
 }
 
 let canvasResizeObserver = null;
@@ -8130,7 +7931,6 @@ function render() {
   drawPlayerNameLabel();
   drawMapBanner();
   drawMinimap();
-  drawGameUIWindows();
   drawNpcDialogue();
   drawFpsCounter();
   drawTransitionOverlay();
@@ -8779,9 +8579,6 @@ function bindInput() {
     const screenX = (e.clientX - rect.left) * scaleX;
     const screenY = (e.clientY - rect.top) * scaleY;
 
-    // UI window drag + tooltip
-    uiWindowPointerMove(screenX, screenY);
-
     runtime.mouseWorld.x = screenX - gameViewWidth() / 2 + runtime.camera.x;
 
     // Handle hover for NPC dialogue options or NPC sprites
@@ -8795,8 +8592,6 @@ function bindInput() {
       }
       runtime.npcDialogue.hoveredOption = foundOption;
       canvasEl.style.cursor = foundOption >= 0 ? "pointer" : "";
-    } else if (uiWindowHitTest(screenX, screenY)) {
-      canvasEl.style.cursor = "default";
     } else if (!runtime.loading.active && !runtime.portalWarpInProgress && runtime.map) {
       const npc = findNpcAtScreen(screenX, screenY);
       canvasEl.style.cursor = npc ? "pointer" : "";
@@ -8817,9 +8612,6 @@ function bindInput() {
     const rect = canvasEl.getBoundingClientRect();
     const cx = (e.clientX - rect.left) * (canvasEl.width / rect.width);
     const cy = (e.clientY - rect.top) * (canvasEl.height / rect.height);
-
-    // UI windows (equipment/inventory) take priority
-    if (uiWindowPointerDown(cx, cy)) return;
 
     // If NPC dialogue is open, check for option clicks or advance
     if (runtime.npcDialogue.active) {
@@ -8910,10 +8702,10 @@ function bindInput() {
         return;
       }
       // Close any open UI windows
-      if (uiWindows.equip.visible || uiWindows.inventory.visible) {
+      if (isUIWindowVisible("equip") || isUIWindowVisible("inventory")) {
         event.preventDefault();
-        uiWindows.equip.visible = false;
-        uiWindows.inventory.visible = false;
+        if (equipWindowEl) equipWindowEl.classList.add("hidden");
+        if (inventoryWindowEl) inventoryWindowEl.classList.add("hidden");
         return;
       }
     }
@@ -8934,8 +8726,8 @@ function bindInput() {
     }
 
     // UI window toggles
-    if (event.code === "KeyE" && !event.repeat) { toggleUIWindow("equip"); return; }
-    if (event.code === "KeyI" && !event.repeat) { toggleUIWindow("inventory"); return; }
+    if (event.code === runtime.keybinds.equip && !event.repeat) { toggleUIWindow("equip"); return; }
+    if (event.code === runtime.keybinds.inventory && !event.repeat) { toggleUIWindow("inventory"); return; }
 
     if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space",
          "PageUp", "PageDown", "Home", "End", "Tab"].includes(event.code)) {
@@ -9070,7 +8862,6 @@ summaryEl?.addEventListener("pointerdown", () => {
 
 window.addEventListener("pointerup", () => {
   runtimeSummaryPointerSelecting = false;
-  uiWindowPointerUp();
 });
 
 summaryEl?.addEventListener("blur", () => {
@@ -9082,6 +8873,8 @@ syncSettingsToUI();
 applyFixedRes();
 initPlayerEquipment();
 initPlayerInventory();
+initUIWindowDrag();
+refreshUIWindows();
 initializeTeleportPresetInputs();
 initializeStatInputs();
 initChatLogResize();

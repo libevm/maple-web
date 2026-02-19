@@ -622,3 +622,161 @@ button {
   color: #fbbf24;
   font-style: italic;
 }
+
+/* ── In-game UI windows (Equipment / Inventory) ── */
+.game-window {
+  position: absolute;
+  z-index: 25;
+  top: 80px;
+  left: 50px;
+  border-radius: 6px;
+  border: 1px solid rgba(180, 160, 120, 0.35);
+  background: linear-gradient(180deg, rgba(20, 28, 48, 0.94) 0%, rgba(12, 16, 32, 0.96) 100%);
+  box-shadow:
+    0 2px 12px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  min-width: 160px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.game-window.hidden {
+  display: none;
+}
+
+.game-window-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 26px;
+  padding: 0 6px 0 10px;
+  background: linear-gradient(180deg, rgba(60, 52, 38, 0.85) 0%, rgba(40, 34, 24, 0.9) 100%);
+  border-bottom: 1px solid rgba(180, 160, 120, 0.25);
+  border-radius: 6px 6px 0 0;
+  cursor: grab;
+}
+
+.game-window-titlebar:active {
+  cursor: grabbing;
+}
+
+.game-window-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #c4b998;
+  letter-spacing: 0.03em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.game-window-close {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(200, 120, 100, 0.4);
+  border-radius: 3px;
+  background: rgba(120, 40, 30, 0.5);
+  color: rgba(255, 200, 180, 0.8);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.1s, color 0.1s;
+}
+
+.game-window-close:hover {
+  background: rgba(180, 50, 30, 0.7);
+  color: #fff;
+}
+
+.game-window-body {
+  padding: 8px;
+}
+
+/* ── Equip grid: 3 cols × 4 rows ── */
+.equip-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 36px);
+  grid-template-rows: repeat(4, 36px);
+  gap: 3px;
+  justify-content: center;
+}
+
+/* ── Inventory grid: 4 cols × 6 rows ── */
+.inv-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 36px);
+  grid-template-rows: repeat(6, 36px);
+  gap: 3px;
+}
+
+/* ── Item slot ── */
+.item-slot {
+  width: 36px;
+  height: 36px;
+  border-radius: 3px;
+  border: 1px solid rgba(80, 90, 120, 0.4);
+  background: rgba(18, 22, 38, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: border-color 0.1s, background 0.1s;
+}
+
+.item-slot:hover {
+  border-color: rgba(180, 160, 120, 0.5);
+  background: rgba(30, 36, 54, 0.9);
+}
+
+.item-slot.empty {
+  border-color: rgba(50, 58, 80, 0.35);
+  background: rgba(12, 16, 28, 0.5);
+}
+
+.item-slot img {
+  max-width: 32px;
+  max-height: 32px;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.item-slot .slot-label {
+  font-size: 8px;
+  color: rgba(120, 130, 160, 0.5);
+  text-align: center;
+  line-height: 1.1;
+  pointer-events: none;
+}
+
+.item-slot .slot-qty {
+  position: absolute;
+  bottom: 1px;
+  right: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 4px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
+
+/* ── Tooltip ── */
+.ui-tooltip {
+  position: absolute;
+  z-index: 30;
+  padding: 5px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(180, 160, 120, 0.35);
+  background: rgba(10, 14, 26, 0.95);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  color: #e8e0d0;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-line;
+  pointer-events: none;
+}
+
+.ui-tooltip.hidden {
+  display: none;
+}

@@ -66,6 +66,14 @@
                 <button class="keybind-btn" data-action="jump" title="Click to rebind">Space</button>
               </div>
               <div class="keybind-row">
+                <span class="keybind-label">Equipment</span>
+                <button class="keybind-btn" data-action="equip" title="Click to rebind">E</button>
+              </div>
+              <div class="keybind-row">
+                <span class="keybind-label">Inventory</span>
+                <button class="keybind-btn" data-action="inventory" title="Click to rebind">I</button>
+              </div>
+              <div class="keybind-row">
                 <span class="keybind-label">😣 Pain</span>
                 <button class="keybind-btn" data-action="face1" title="Click to rebind">1</button>
               </div>
@@ -189,6 +197,25 @@
           </section>
         </div>
       </aside>
+
+      <!-- In-game UI windows -->
+      <div id="equip-window" class="game-window hidden">
+        <div class="game-window-titlebar" data-window="equip">
+          <span class="game-window-title">Equipment</span>
+          <button class="game-window-close" data-close="equip">&times;</button>
+        </div>
+        <div class="game-window-body equip-grid" id="equip-grid"></div>
+      </div>
+
+      <div id="inventory-window" class="game-window hidden" style="left: 200px">
+        <div class="game-window-titlebar" data-window="inventory">
+          <span class="game-window-title">Inventory</span>
+          <button class="game-window-close" data-close="inventory">&times;</button>
+        </div>
+        <div class="game-window-body inv-grid" id="inv-grid"></div>
+      </div>
+
+      <div id="ui-tooltip" class="ui-tooltip hidden"></div>
 
       <div id="chat-log" class="chat-log">
         <div id="chat-log-handle" class="chat-log-handle">
