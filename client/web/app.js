@@ -1457,7 +1457,10 @@ function initUIWindowDrag() {
     closeBtn.addEventListener("click", () => {
       const key = closeBtn.dataset.close;
       const el = getUIWindowEl(key);
-      if (el) el.classList.add("hidden");
+      if (el) {
+        el.classList.add("hidden");
+        playUISound("MenuDown");
+      }
     });
   }
 
