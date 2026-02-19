@@ -675,7 +675,7 @@ function buildSlotEl(icon, label, qty, tooltipData, clickData) {
         clearTimeout(_slotClickTimer);
         _slotClickTimer = setTimeout(() => {
           startItemDrag(clickData.source, clickData.index, clickData.item);
-        }, 200);
+        }, 50);
       }
     });
     slot._cancelPendingClick = () => clearTimeout(_slotClickTimer);
@@ -779,7 +779,7 @@ function refreshInvGrid() {
             id: item.id, name: item.name, qty: item.qty,
             iconKey: item.iconKey, category: item.category,
           });
-        }, 200);
+        }, 50);
       }
     });
 
