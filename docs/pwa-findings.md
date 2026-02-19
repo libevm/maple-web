@@ -28,6 +28,30 @@ The docs UI includes sidebar navigation for markdown files under `docs/`.
 
 ---
 
+## 2026-02-19 17:15 (GMT+11)
+### Summary
+- Fixed jump-through-wall bug on tall multi-segment walls (e.g., subway map 103000900).
+
+### Files changed
+- `client/web/app.js`
+
+### What changed
+- Root cause: `getWallX` only checked 2 foothold chain links for blocking walls, using a 50px Y window.
+  Tall walls in the subway map are composed of many 60px vertical wall segments. When jumping,
+  `nextY` moves above the 2-link check range, causing the wall check to fall through to the
+  map side-wall boundary (much further away), allowing the player to pass through.
+- Fix: pre-built `wallColumnsByX` index at map parse time — maps each wall X position to the full
+  `{minY, maxY}` extent of all wall footholds at that X.
+- `getWallX` now uses `isWallColumnBlocking()` instead of `isBlockingWall()` for chain-discovered
+  walls. This checks the full column extent, not just the immediate chain segment.
+- Only walls discovered through the normal foothold chain (prev/prevprev, next/nextnext) are checked
+  against their column — no global wall scan, so small platform walls remain non-blocking.
+
+### Validation
+- `bun run ci` ✅
+
+---
+
 ## 2026-02-19 16:53 (GMT+11)
 ### Summary
 - Fixed intermittent one-frame face disappearance during facial animation transitions.

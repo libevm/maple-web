@@ -3591,6 +3591,21 @@ function parseMapData(raw) {
       y2: Math.max(line.y1, line.y2),
     }));
 
+  // Pre-index wall columns by X — each key maps to the full vertical extent
+  // of all wall footholds at that X. Used by getWallX to check tall wall columns
+  // efficiently (avoids jump-through on multi-segment walls).
+  const wallColumnsByX = new Map();
+  for (const wall of wallLines) {
+    const xKey = Math.round(wall.x);
+    const existing = wallColumnsByX.get(xKey);
+    if (existing) {
+      existing.minY = Math.min(existing.minY, wall.y1);
+      existing.maxY = Math.max(existing.maxY, wall.y2);
+    } else {
+      wallColumnsByX.set(xKey, { minY: wall.y1, maxY: wall.y2 });
+    }
+  }
+
   const points = [];
   for (const line of footholdLines) {
     points.push({ x: line.x1, y: line.y1 }, { x: line.x2, y: line.y2 });
@@ -3640,6 +3655,7 @@ function parseMapData(raw) {
     footholdLines,
     footholdById,
     wallLines,
+    wallColumnsByX,
     walls,
     borders,
     footholdBounds: {
@@ -5131,32 +5147,55 @@ function isBlockingWall(foothold, minY, maxY) {
   return rangesOverlap(foothold.y1, foothold.y2, minY, maxY);
 }
 
+// Check if the full wall column at wallX blocks at the given Y range.
+// Uses pre-built wallColumnsByX index for O(1) lookup.
+function isWallColumnBlocking(map, wallX, minY, maxY) {
+  const col = map.wallColumnsByX?.get(Math.round(wallX));
+  if (!col) return false;
+  return col.maxY >= minY && col.minY <= maxY;
+}
+
 function getWallX(map, current, left, nextY) {
   const minY = Math.floor(nextY) - 50;
   const maxY = Math.floor(nextY) - 1;
 
   if (left) {
     const prev = findFootholdById(map, current.prevId);
-    if (isBlockingWall(prev, minY, maxY)) {
-      return fhLeft(current);
-    }
 
-    const prevPrev = prev ? findFootholdById(map, prev.prevId) : null;
-    if (isBlockingWall(prevPrev, minY, maxY)) {
-      return fhLeft(prev);
+    if (prev && fhIsWall(prev)) {
+      // Found wall in chain — check the full column at that X (handles tall multi-segment walls)
+      const wallX = prev.x1;
+      if (isWallColumnBlocking(map, wallX, minY, maxY)) {
+        return fhLeft(current);
+      }
+    } else if (prev) {
+      const prevPrev = findFootholdById(map, prev.prevId);
+      if (prevPrev && fhIsWall(prevPrev)) {
+        const wallX = prevPrev.x1;
+        if (isWallColumnBlocking(map, wallX, minY, maxY)) {
+          return fhLeft(prev);
+        }
+      }
     }
 
     return map.walls?.left ?? map.bounds.minX;
   }
 
   const next = findFootholdById(map, current.nextId);
-  if (isBlockingWall(next, minY, maxY)) {
-    return fhRight(current);
-  }
 
-  const nextNext = next ? findFootholdById(map, next.nextId) : null;
-  if (isBlockingWall(nextNext, minY, maxY)) {
-    return fhRight(next);
+  if (next && fhIsWall(next)) {
+    const wallX = next.x1;
+    if (isWallColumnBlocking(map, wallX, minY, maxY)) {
+      return fhRight(current);
+    }
+  } else if (next) {
+    const nextNext = findFootholdById(map, next.nextId);
+    if (nextNext && fhIsWall(nextNext)) {
+      const wallX = nextNext.x1;
+      if (isWallColumnBlocking(map, wallX, minY, maxY)) {
+        return fhRight(next);
+      }
+    }
   }
 
   return map.walls?.right ?? map.bounds.maxX;

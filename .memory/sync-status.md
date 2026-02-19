@@ -1,6 +1,6 @@
 # .memory Sync Status
 
-Last synced: 2026-02-19T16:53:00+11:00
+Last synced: 2026-02-19T17:15:00+11:00
 Status: ✅ Synced
 
 ## Current authoritative memory files
@@ -16,7 +16,7 @@ Status: ✅ Synced
 - `.memory/physics-units.md`
 
 ## Codebase Metrics Snapshot
-- `client/web/app.js`: **8442 lines** (single-file debug web client)
+- `client/web/app.js`: **8492 lines** (single-file debug web client)
 - `client/src/` files: 13 (Phase 6 scaffolding — world-stage, combat-orchestrator, entity-pool)
 - `server/src/` files: 6 (data-provider, server, build/dev/test harness)
 - `packages/shared-schemas/src/` files: 4 (Zod schemas, constants)

@@ -210,6 +210,10 @@ Matches C++ `FootholdTree::get_wall()`:
   - uses side-wall fallback only when foothold context is missing
   - no global wall-line intersection fallback (to avoid over-blocking on local short vertical walls)
   - final clamp uses `clampXToSideWalls` (C++-style map wall bounds).
+- `getWallX` uses wall column index (`wallColumnsByX`) to check the FULL vertical extent of wall
+  columns, not just the 2 chain links. This prevents jumping through tall multi-segment walls
+  (e.g., subway car boundaries in 103000900) while keeping the foothold-chain scoping that
+  prevents false positives on unrelated walls.
 - Side clamp helper:
   - `clampXToSideWalls(...)` hard clamp to map side walls (`map.walls`, fallback `footholdBounds`).
 - Post-physics and hit-time safety:
