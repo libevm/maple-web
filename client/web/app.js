@@ -8911,6 +8911,8 @@ async function preloadLoadingScreenAssets() {
 
 function startLoginBgm() {
   if (_loginBgmPlaying || !_loginBgm || !runtime.settings.bgmEnabled) return;
+  // Don't play login BGM if map BGM is already active
+  if (runtime.bgmAudio && !runtime.bgmAudio.paused) return;
   _loginBgm.currentTime = 0;
   _loginBgm.play().catch(() => {});
   _loginBgmPlaying = true;
