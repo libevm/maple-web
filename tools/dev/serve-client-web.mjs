@@ -82,7 +82,16 @@ function handleRequest(request) {
   }
 
   const relativePath = url.pathname.slice(1);
-  return serveFile(safeJoin(webRoot, relativePath));
+  const filePath = safeJoin(webRoot, relativePath);
+
+  // Try exact path first, then with .html extension (e.g. /editor → editor.html)
+  if (existsSync(filePath)) {
+    return serveFile(filePath);
+  }
+  if (!extname(relativePath) && existsSync(filePath + ".html")) {
+    return serveFile(filePath + ".html");
+  }
+  return serveFile(filePath);
 }
 
 function startServer(startPort, attempts = 10) {

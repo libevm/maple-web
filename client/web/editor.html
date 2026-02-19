@@ -248,9 +248,6 @@ async function handleFileTreeClick(e) {
     if (childrenEl.children.length === 0) {
       childrenEl.innerHTML = '<div style="padding:4px 24px;color:#64748b;font-size:11px;">Loading...</div>';
       try {
-        const listing = await fetchJson(`resources/${dir}`);
-        // listing might be a directory listing or a JSON file directly
-        // Try to enumerate .img.json files
         const files = await discoverFiles(dir);
         let fhtml = "";
         for (const file of files) {
@@ -273,71 +270,38 @@ async function handleFileTreeClick(e) {
   }
 }
 
-async function discoverFiles(dir) {
-  // Try fetching a directory listing by convention
-  // The dev server serves static files — we'll try fetching an index or known patterns
+async function listDir(path) {
   try {
-    const resp = await fetch(`/resources/${dir}/`);
-    if (resp.ok) {
-      const text = await resp.text();
-      // Try to parse as JSON array or HTML directory listing
-      try {
-        const arr = JSON.parse(text);
-        if (Array.isArray(arr)) return arr.filter(f => f.endsWith(".json")).sort();
-      } catch {}
-      // Parse HTML links
-      const matches = [...text.matchAll(/href="([^"]+\.img\.json)"/g)].map(m => m[1]);
-      if (matches.length > 0) return matches.sort();
-    }
-  } catch {}
-
-  // Fallback: try known file patterns
-  const known = await tryKnownFiles(dir);
-  return known;
+    const resp = await fetch(`/resources/${path}/`);
+    if (!resp.ok) return [];
+    const arr = await resp.json();
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
 }
 
-async function tryKnownFiles(dir) {
-  // For Map.wz, scan subdirectories
-  if (dir === "Map.wz") {
-    const subs = ["Map/Map0","Map/Map1","Map/Map2","Map/Map3","Map/Map4","Map/Map5",
-      "Map/Map6","Map/Map7","Map/Map8","Map/Map9","Back","Obj","Tile","Physics.img.json",
-      "MapHelper.img.json"];
-    const files = [];
-    for (const sub of subs) {
-      if (sub.endsWith(".json")) { files.push(sub); continue; }
-      try {
-        const resp = await fetch(`/resources/${dir}/${sub}/`);
-        if (resp.ok) {
-          const text = await resp.text();
-          try {
-            const arr = JSON.parse(text);
-            if (Array.isArray(arr)) {
-              for (const f of arr) {
-                if (f.endsWith(".json")) files.push(`${sub}/${f}`);
-              }
-            }
-          } catch {
-            const matches = [...text.matchAll(/href="([^"]+\.json)"/g)].map(m => m[1]);
-            for (const m of matches) files.push(`${sub}/${m}`);
-          }
-        }
-      } catch {}
+async function discoverFiles(dir, maxDepth = 3) {
+  const files = [];
+
+  async function scan(prefix, depth) {
+    if (depth > maxDepth) return;
+    const entries = await listDir(prefix);
+    const subdirs = [];
+    for (const entry of entries) {
+      if (entry.endsWith(".json")) {
+        const rel = prefix === dir ? entry : prefix.slice(dir.length + 1) + "/" + entry;
+        files.push(rel);
+      } else if (!entry.includes(".")) {
+        // Likely a subdirectory (no extension)
+        subdirs.push(prefix + "/" + entry);
+      }
     }
-    return files.sort();
+    for (const sub of subdirs) {
+      await scan(sub, depth + 1);
+    }
   }
 
-  // Generic: try to list directory
-  try {
-    const resp = await fetch(`/resources/${dir}/`);
-    if (resp.ok) {
-      const text = await resp.text();
-      try {
-        const arr = JSON.parse(text);
-        if (Array.isArray(arr)) return arr.filter(f => f.endsWith(".json")).sort();
-      } catch {}
-    }
-  } catch {}
-  return [];
+  await scan(dir, 0);
+  return files.sort();
 }
 
 // ─── Open File ───
