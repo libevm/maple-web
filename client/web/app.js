@@ -426,13 +426,26 @@ const EQUIP_SLOT_LIST = [
 ];
 
 const INV_COLS = 4;
-const INV_ROWS = 6;
+const INV_ROWS = 8;
+const INV_MAX_SLOTS = INV_COLS * INV_ROWS; // 32 slots per tab
 
 /** Player equipment slots — maps category to { id, name, iconSrc } */
 const playerEquipped = new Map();
 
-/** Player inventory — array of { id, name, qty, iconSrc } */
+/** Player inventory — array of { id, name, qty, iconKey, invType, category, slot } */
 const playerInventory = [];
+
+/** Find the first free slot index (0..INV_MAX_SLOTS-1) for a given tab type. Returns -1 if full. */
+function findFreeSlot(invType) {
+  const occupied = new Set();
+  for (const it of playerInventory) {
+    if (it.invType === invType) occupied.add(it.slot);
+  }
+  for (let s = 0; s < INV_MAX_SLOTS; s++) {
+    if (!occupied.has(s)) return s;
+  }
+  return -1;
+}
 
 /** Selected/dragged item state */
 const draggedItem = {
@@ -611,7 +624,9 @@ function initPlayerInventory() {
   for (const item of starterItems) {
     const iconKey = loadItemIcon(item.id);
     const invType = inventoryTypeById(item.id) || "ETC";
-    playerInventory.push({ id: item.id, name: "...", qty: item.qty, iconKey, invType });
+    const slot = findFreeSlot(invType);
+    if (slot === -1) continue; // tab full
+    playerInventory.push({ id: item.id, name: "...", qty: item.qty, iconKey, invType, slot });
     loadItemName(item.id).then(name => {
       const entry = playerInventory.find(e => e.id === item.id);
       if (entry) { entry.name = name || `Item ${item.id}`; refreshUIWindows(); }
@@ -699,27 +714,61 @@ function refreshInvGrid() {
     btn.classList.toggle("active", btn.dataset.tab === currentInvTab);
   }
 
-  // Filter items by current tab
-  const tabItems = [];
+  // Build slot map for current tab: slotIndex → { item, realIndex }
+  const slotMap = new Map();
   for (let i = 0; i < playerInventory.length; i++) {
     const it = playerInventory[i];
-    if (it.invType === currentInvTab) tabItems.push({ item: it, realIndex: i });
+    if (it.invType === currentInvTab) {
+      slotMap.set(it.slot, { item: it, realIndex: i });
+    }
   }
 
-  const totalSlots = INV_COLS * INV_ROWS;
-  for (let i = 0; i < totalSlots; i++) {
-    const entry = tabItems[i] ?? null;
+  for (let s = 0; s < INV_MAX_SLOTS; s++) {
+    const entry = slotMap.get(s) ?? null;
     const item = entry?.item ?? null;
     const realIdx = entry?.realIndex ?? -1;
     const iconUri = item ? getIconDataUri(item.iconKey) : null;
     const tooltip = item ? { name: item.name, qty: item.qty, id: item.id } : null;
+
+    // Click data only when the slot has an item and we're NOT already dragging
     const clickData = item ? {
       source: "inventory", index: realIdx,
       item: { id: item.id, name: item.name, qty: item.qty, iconKey: item.iconKey, category: item.category },
     } : null;
     const slotEl = buildSlotEl(iconUri, null, item?.qty ?? 0, tooltip, clickData);
+
+    // Handle drag interaction: clicking any slot while dragging
+    const slotIndex = s;
+    slotEl.addEventListener("click", () => {
+      if (!draggedItem.active) return;
+      if (draggedItem.source !== "inventory") return;
+      const dragSrcIdx = draggedItem.sourceIndex;
+      const dragSrcItem = playerInventory[dragSrcIdx];
+      if (!dragSrcItem) { cancelItemDrag(); return; }
+      // Don't drop onto itself
+      if (dragSrcItem.invType === currentInvTab && dragSrcItem.slot === slotIndex) {
+        cancelItemDrag();
+        return;
+      }
+      // Only allow dropping within the same tab
+      if (dragSrcItem.invType !== currentInvTab) { cancelItemDrag(); return; }
+
+      if (item) {
+        // Swap: exchange slot indices
+        const targetSlot = item.slot;
+        item.slot = dragSrcItem.slot;
+        dragSrcItem.slot = targetSlot;
+      } else {
+        // Move to empty slot
+        dragSrcItem.slot = slotIndex;
+      }
+      draggedItem.active = false;
+      playUISound("DragEnd");
+      refreshUIWindows();
+    });
+
     // Double-click on EQUIP tab item → equip it
-    if (item && currentInvTab === "EQUIP" && clickData) {
+    if (item && currentInvTab === "EQUIP") {
       slotEl.addEventListener("dblclick", () => equipItemFromInventory(realIdx));
     }
     invGridEl.appendChild(slotEl);
@@ -826,6 +875,8 @@ function unequipItem(slotType) {
   playerEquipped.delete(slotType);
 
   // Add to inventory EQUIP tab
+  const freeSlot = findFreeSlot("EQUIP");
+  if (freeSlot === -1) { rlog("EQUIP tab is full, cannot unequip"); playerEquipped.set(slotType, equipped); return; }
   playerInventory.push({
     id: equipped.id,
     name: equipped.name,
@@ -833,6 +884,7 @@ function unequipItem(slotType) {
     iconKey: equipped.iconKey,
     invType: "EQUIP",
     category: slotType,
+    slot: freeSlot,
   });
 
   // Remove equip data from rendering
@@ -857,8 +909,9 @@ function equipItemFromInventory(invIndex) {
   const slotType = item.category || equipSlotFromId(item.id);
   if (!slotType) return;
 
-  // If something already in that slot, swap to inventory
+  // If something already in that slot, swap to inventory (reuse the outgoing item's slot)
   const existing = playerEquipped.get(slotType);
+  const reuseSlot = item.slot; // the slot the outgoing item will take
   if (existing) {
     playerInventory.push({
       id: existing.id,
@@ -867,6 +920,7 @@ function equipItemFromInventory(invIndex) {
       iconKey: existing.iconKey,
       invType: "EQUIP",
       category: slotType,
+      slot: reuseSlot,
     });
     // Remove old equip data from rendering
     delete runtime.characterEquipData[existing.id];
@@ -1072,6 +1126,11 @@ function tryLootDrop() {
         const iconKey = wzCat
           ? loadEquipIcon(drop.id, wzCat)
           : loadItemIcon(drop.id);
+        const freeSlot = findFreeSlot(invType);
+        if (freeSlot === -1) {
+          rlog(`${invType} tab is full, cannot pick up item`);
+          return;
+        }
         playerInventory.push({
           id: drop.id,
           name: drop.name,
@@ -1079,6 +1138,7 @@ function tryLootDrop() {
           iconKey: iconKey,
           invType,
           category: drop.category || null,
+          slot: freeSlot,
         });
       }
 

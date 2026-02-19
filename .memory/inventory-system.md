@@ -1,7 +1,7 @@
 # Inventory System
 
-> Implements the MapleStory item inventory with tabbed categories, drag-drop,
-> ground drops, and loot. C++ reference: `UIItemInventory`, `Inventory`, `InventoryType`.
+> Implements the MapleStory item inventory with tabbed categories, slot-based positioning,
+> drag-drop with swap, ground drops, and loot. C++ reference: `UIItemInventory`, `Inventory`, `InventoryType`.
 
 ## Inventory Types (C++ `InventoryType::by_item_id`)
 
@@ -30,6 +30,7 @@ Each entry:
   iconKey: string,  // key into iconDataUriCache
   invType: string,  // "EQUIP" | "USE" | "SETUP" | "ETC" | "CASH"
   category: string, // equip slot type for EQUIP items (e.g. "Coat"), null otherwise
+  slot: number,     // 0-based slot index within this tab (0..31)
 }
 ```
 
@@ -41,9 +42,10 @@ Each entry:
 
 ### Slot Layout
 
-- `INV_COLS = 4`, `INV_ROWS = 6` → 24 visible slots per tab
-- Grid rendered by `refreshInvGrid()`, filtered by `currentInvTab`
-- Items beyond 24 in a tab are not visible (no scroll yet)
+- `INV_COLS = 4`, `INV_ROWS = 8` → `INV_MAX_SLOTS = 32` per tab
+- Each item has a `slot` field (0..31) determining its grid position
+- `findFreeSlot(invType)` scans for first unoccupied slot in a tab
+- Grid rendered by `refreshInvGrid()`, builds `slotMap` (slot→item) per tab
 
 ## UI Structure
 
@@ -78,16 +80,22 @@ Each entry:
 
 ## Slot Interactions
 
-### Single Click — Start Drag
+### Single Click (no drag active) — Start Drag
 - Click any item slot → `startItemDrag(source, index, item)`
 - Sets `draggedItem` state, dims source slot to 40% opacity
 - Ghost icon follows cursor (bottom-right anchor via CSS transform)
-- Click again or Escape → `cancelItemDrag()`
+- Click again on same slot or Escape → `cancelItemDrag()`
+
+### Single Click (drag active) — Move / Swap
+- Click **empty slot** → moves dragged item to that slot (updates `slot` field)
+- Click **occupied slot** → swaps `slot` values between the two items
+- Only works within the same tab (cross-tab drag cancels)
+- Clicking the item's own slot cancels the drag
 
 ### Double-Click — Equip (EQUIP tab only)
 - Double-click inventory EQUIP item → `equipItemFromInventory(invIndex)`
 - Moves item from inventory to `playerEquipped`
-- If slot occupied, existing equip swapped back to inventory
+- If equipment slot occupied, existing equip takes the vacated inventory slot
 - Loads WZ data, clears character placement cache
 
 ### Drop on Map
@@ -147,19 +155,20 @@ Each entry:
 - Z key (configurable) → `tryLootDrop()`
 - 50px range, player on ground, drop must be `onGround`
 - One item per press (C++ `lootenabled` parity)
-- Equip items: non-stackable, added with `invType: "EQUIP"`
+- Equip items: non-stackable, added with `invType: "EQUIP"`, assigned free slot
 - Other items: stack if same ID exists in inventory
+- If tab is full (`findFreeSlot` returns -1), pickup is rejected
 
 ## Starter Items
 
 ```js
 // initPlayerInventory()
-{ id: 2000000, qty: 30 },  // Red Potion     → USE tab
-{ id: 2000001, qty: 15 },  // Orange Potion  → USE tab
-{ id: 2000002, qty: 5  },  // White Potion   → USE tab
-{ id: 2010000, qty: 10 },  // Blue Potion    → USE tab
-{ id: 4000000, qty: 8  },  // Snail Shell    → ETC tab
-{ id: 4000001, qty: 3  },  // Blue Snail Shell → ETC tab
+{ id: 2000000, qty: 30 },  // Red Potion     → USE tab, slot 0
+{ id: 2000001, qty: 15 },  // Orange Potion  → USE tab, slot 1
+{ id: 2000002, qty: 5  },  // White Potion   → USE tab, slot 2
+{ id: 2010000, qty: 10 },  // Blue Potion    → USE tab, slot 3
+{ id: 4000000, qty: 8  },  // Snail Shell    → ETC tab, slot 0
+{ id: 4000001, qty: 3  },  // Blue Snail Shell → ETC tab, slot 1
 ```
 
 ## Keybinds
@@ -169,9 +178,10 @@ Each entry:
 
 ## Known Limitations
 
-- No scroll/pagination within a tab (max 24 visible slots)
+- No scroll/pagination within a tab (32 slots all visible)
 - No item sorting or gathering (C++ has Sort/Gather buttons)
 - No item use (double-click USE items does nothing yet)
 - No meso display
 - No item tooltips with stat details (only name/qty/ID)
 - No stack splitting when dropping partial quantities
+- No cross-tab item dragging
