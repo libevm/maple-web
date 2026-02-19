@@ -306,6 +306,8 @@ const runtime = {
     face5: "Digit5",
     face6: "Digit6",
     face7: "Digit7",
+    face8: "Digit8",
+    face9: "Digit9",
   },
   mouseWorld: { x: 0, y: 0 },
   characterData: null,
@@ -1347,6 +1349,8 @@ const KEYBIND_LABELS = {
   face5: "😠 Angry",
   face6: "😲 Surprised",
   face7: "😵 Shocked",
+  face8: "😛 Tongue",
+  face9: "😴 Snoozing",
 };
 
 function buildKeybindsUI() {
@@ -9465,7 +9469,7 @@ async function loadMap(mapId, spawnPortalName = null, spawnFromPortalTransfer = 
 
 function bindInput() {
   const gameplayKeys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Space", "KeyA", "KeyD", "KeyW", "KeyS",
-    "KeyC", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7"]; // attack, face expressions
+    "KeyC", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9"]; // attack, face expressions
 
   function setInputEnabled(enabled) {
     runtime.input.enabled = enabled;
@@ -9706,6 +9710,8 @@ function bindInput() {
       face5: "angry",      // F5 — angry
       face6: "bewildered", // F6 — surprised
       face7: "stunned",    // F7 — shocked
+      face8: "chu",        // F8 — tongue
+      face9: "hum",        // F9 — snoozing
     };
     for (const [action, expr] of Object.entries(FACE_EXPRESSIONS)) {
       if (event.code === runtime.keybinds[action] && !event.repeat) {
