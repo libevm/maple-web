@@ -15,7 +15,7 @@ Status: ✅ Synced
 | `client-server.md` | **Complete client-server architecture**: session/auth model, character state schema, WebSocket protocol, V2 map set, resource pipeline, implementation order |
 | `game-design.md` | High-level game design notes and feature goals |
 | `tech-stack.md` | Technology choices, tooling, build system (note: partially stale — actual stack is vanilla JS + raw Bun.serve, not Fastify/Vite) |
-| `implementation-plan.md` | Detailed implementation plan and task breakdown |
+| `implementation-plan.md` | **Step-by-step implementation plan** for online multiplayer: 5 phases, ~40 steps, with exact file paths, code snippets, and test instructions |
 | `cpp-port-architecture-snapshot.md` | C++ reference client architecture snapshot (read-only reference) |
 
 ## Codebase Metrics Snapshot
