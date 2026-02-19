@@ -3463,6 +3463,7 @@ function parseMapData(raw) {
           // Animation fields — populated during preload
           frameCount: 1,
           frameDelays: null, // null = not animated, [ms, ms, ...] = animated
+          frameOpacities: null, // null = not animated, [{start, end}, ...] per frame
           frameKeys: null, // null = [0..frameCount-1], otherwise explicit frame token sequence
           _metaRequested: false,
         };
@@ -3842,6 +3843,7 @@ async function loadAnimatedObjectFrames(obj) {
   if (frameEntries.length <= 1) return null;
 
   const delays = [];
+  const opacities = [];
   const frameKeys = [];
   for (const entry of frameEntries) {
     const frameIdx = entry.token;
@@ -3877,12 +3879,14 @@ async function loadAnimatedObjectFrames(obj) {
       }
     }
     delays.push(Math.max(delay, 30));
+    // Extract per-frame opacity (a0/a1) matching C++ Frame constructor
+    opacities.push({ start: meta.opacityStart, end: meta.opacityEnd });
     frameKeys.push(frameIdx);
 
     await requestImageByKey(key);
   }
 
-  return delays.length > 1 ? { frameCount: delays.length, delays, frameKeys } : null;
+  return delays.length > 1 ? { frameCount: delays.length, delays, opacities, frameKeys } : null;
 }
 
 function requestObjectMeta(obj) {
@@ -4876,6 +4880,7 @@ function buildMapAssetPreloadTasks(map) {
             for (const o of objsWithSameBase) {
               o.frameCount = result.frameCount;
               o.frameDelays = result.delays;
+              o.frameOpacities = result.opacities ?? null;
               o.frameKeys = result.frameKeys ?? null;
             }
           }
@@ -6059,15 +6064,29 @@ function updateObjectAnimations(dtMs) {
       const stateKey = `${layer.layerIndex}:${obj.id}`;
       let state = objectAnimStates.get(stateKey);
       if (!state) {
-        state = { frameIndex: 0, timerMs: 0 };
+        const startOpc = obj.frameOpacities?.[0]?.start ?? 255;
+        state = { frameIndex: 0, timerMs: 0, opacity: startOpc };
         objectAnimStates.set(stateKey, state);
       }
 
+      // Accumulate opacity per tick using current frame's rate of change.
+      // opcstep = dtMs * (a1 - a0) / delay — drives opacity toward end value.
+      // No hard snap at frame boundaries: opacity carries over smoothly.
+      const fi = state.frameIndex % obj.frameDelays.length;
+      const frameDelay = obj.frameDelays[fi];
+      const opc = obj.frameOpacities?.[fi];
+      if (opc && frameDelay > 0) {
+        const opcStep = dtMs * (opc.end - opc.start) / frameDelay;
+        state.opacity += opcStep;
+        if (state.opacity < 0) state.opacity = 0;
+        else if (state.opacity > 255) state.opacity = 255;
+      }
+
       state.timerMs += dtMs;
-      const delay = obj.frameDelays[state.frameIndex % obj.frameDelays.length];
-      if (state.timerMs >= delay) {
-        state.timerMs -= delay;
+      if (state.timerMs >= frameDelay) {
+        state.timerMs -= frameDelay;
         state.frameIndex = (state.frameIndex + 1) % obj.frameCount;
+        // No opacity reset — let it carry over for smooth transitions
       }
     }
   }
@@ -6105,6 +6124,13 @@ function normalizedRect(left, right, top, bottom) {
 function objectFrameOpacity(meta, state, obj) {
   if (!meta) return 1;
 
+  // Use accumulated opacity from animation state (C++ Animation parity)
+  if (state && typeof state.opacity === "number") {
+    const alpha = state.opacity / 255;
+    return Math.max(0, Math.min(1, alpha));
+  }
+
+  // Fallback for non-animated objects or before animation state is created
   const start = safeNumber(meta.opacityStart, 255);
   const end = safeNumber(meta.opacityEnd, start);
   if (start === 255 && end === 255) return 1;
