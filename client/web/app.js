@@ -6276,9 +6276,11 @@ function trapWorldBounds(obj, meta, nowMs) {
 
   // Fallback to sprite dimensions for frames without lt/rb (e.g. laser
   // fade-in). Skip tiny frames (≤4px) like electric 1×1 cooldown blanks.
+  // Skip invisible frames (opacityStart=0 on non-animated objects like stoneDM waiting state).
   const width = safeNumber(meta.width, 0);
   const height = safeNumber(meta.height, 0);
   if (width <= 4 || height <= 4) return null;
+  if (safeNumber(meta.opacityStart, 255) === 0) return null;
 
   const origin = vectors.origin ?? { x: 0, y: 0 };
   const drawOriginX = obj.flipped ? width - safeNumber(origin.x, 0) : safeNumber(origin.x, 0);
