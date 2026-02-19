@@ -3286,12 +3286,12 @@ function drawNpcDialogue() {
   const lineHeight = 18;
   const optionLineHeight = 26;
   const padding = 16;
-  const headerH = 28;
+  const headerH = 24;
   const textAreaW = boxW - padding * 2 - portraitArea;
 
   // Measure text
   ctx.save();
-  ctx.font = "13px Inter, system-ui, sans-serif";
+  ctx.font = '13px "Dotum", Arial, sans-serif';
   const wrappedLines = wrapText(ctx, text, textAreaW);
   const textH = wrappedLines.length * lineHeight;
 
@@ -3307,32 +3307,69 @@ function drawNpcDialogue() {
   const boxX = Math.round((canvasEl.width - boxW) / 2);
   const boxY = Math.round((canvasEl.height - boxH) / 2);
 
-  // Background
-  ctx.fillStyle = "rgba(0, 0, 0, 0.88)";
-  roundRect(ctx, boxX, boxY, boxW, boxH, 8);
+  // ── HUD-themed background ──
+  const bgGrad = ctx.createLinearGradient(boxX, boxY, boxX, boxY + boxH);
+  bgGrad.addColorStop(0, "#d4dce8");
+  bgGrad.addColorStop(1, "#c0cbdb");
+  roundRect(ctx, boxX, boxY, boxW, boxH, 4);
+  ctx.fillStyle = bgGrad;
   ctx.fill();
-
-  // Border
-  ctx.strokeStyle = "rgba(255, 200, 50, 0.6)";
-  ctx.lineWidth = 1.5;
-  roundRect(ctx, boxX, boxY, boxW, boxH, 8);
+  ctx.strokeStyle = "#8a9bb5";
+  ctx.lineWidth = 2;
+  roundRect(ctx, boxX, boxY, boxW, boxH, 4);
   ctx.stroke();
 
-  // NPC name header
-  ctx.fillStyle = "#fbbf24";
-  ctx.font = "bold 14px Inter, system-ui, sans-serif";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  let headerText = d.npcName;
-  if (d.npcFunc) headerText += `  (${d.npcFunc})`;
-  ctx.fillText(headerText, boxX + padding + portraitArea, boxY + 8);
+  // Drop shadow behind the whole box
+  ctx.shadowColor = "rgba(0,0,0,0.25)";
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetX = 1;
+  ctx.shadowOffsetY = 2;
+  roundRect(ctx, boxX, boxY, boxW, boxH, 4);
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.shadowBlur = 0;
 
-  // Divider
-  ctx.strokeStyle = "rgba(255, 200, 50, 0.3)";
+  // ── Title bar ──
+  const titleGrad = ctx.createLinearGradient(boxX, boxY, boxX, boxY + headerH);
+  titleGrad.addColorStop(0, "#6b82a8");
+  titleGrad.addColorStop(1, "#4a6490");
+  ctx.fillStyle = titleGrad;
+  roundRect(ctx, boxX, boxY, boxW, headerH, 4, true);
+  ctx.fill();
+  ctx.strokeStyle = "#3d5578";
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(boxX + padding + portraitArea, boxY + headerH);
-  ctx.lineTo(boxX + boxW - padding, boxY + headerH);
+  ctx.moveTo(boxX + 1, boxY + headerH);
+  ctx.lineTo(boxX + boxW - 1, boxY + headerH);
+  ctx.stroke();
+
+  // NPC name
+  ctx.fillStyle = "#fff";
+  ctx.font = 'bold 11px "Dotum", Arial, sans-serif';
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.shadowColor = "rgba(0,0,0,0.5)";
+  ctx.shadowOffsetY = 1;
+  let headerText = d.npcName;
+  if (d.npcFunc) headerText += `  (${d.npcFunc})`;
+  ctx.fillText(headerText, boxX + 8, boxY + 7);
+  ctx.shadowColor = "transparent";
+  ctx.shadowOffsetY = 0;
+
+  // ── Content inset ──
+  const insetX = boxX + 6;
+  const insetY = boxY + headerH + 6;
+  const insetW = boxW - 12;
+  const insetH = contentH + padding;
+  const insetGrad = ctx.createLinearGradient(insetX, insetY, insetX, insetY + insetH);
+  insetGrad.addColorStop(0, "#e8edf4");
+  insetGrad.addColorStop(1, "#d8dfe9");
+  ctx.fillStyle = insetGrad;
+  roundRect(ctx, insetX, insetY, insetW, insetH, 2);
+  ctx.fill();
+  ctx.strokeStyle = "#9aa8bc";
+  ctx.lineWidth = 1;
+  roundRect(ctx, insetX, insetY, insetW, insetH, 2);
   ctx.stroke();
 
   // Draw NPC portrait on the left
@@ -3340,39 +3377,38 @@ function drawNpcDialogue() {
     const scale = Math.min(1, 120 / npcImg.width, 140 / npcImg.height);
     const drawW = Math.round(npcImg.width * scale);
     const drawH = Math.round(npcImg.height * scale);
-    const portraitX = boxX + padding + Math.round((portraitW - drawW) / 2);
-    const portraitY = boxY + headerH + Math.round((contentH - drawH) / 2);
+    const portraitX = insetX + 8 + Math.round((portraitW - drawW) / 2);
+    const portraitY = insetY + Math.round((insetH - drawH) / 2);
     ctx.drawImage(npcImg, portraitX, portraitY, drawW, drawH);
   }
 
   // Dialogue text
-  ctx.fillStyle = "#e5e7eb";
-  ctx.font = "13px Inter, system-ui, sans-serif";
-  const textX = boxX + padding + portraitArea;
+  ctx.fillStyle = "#2a3650";
+  ctx.font = '13px "Dotum", Arial, sans-serif';
+  const textX = insetX + 10 + portraitArea;
   for (let i = 0; i < wrappedLines.length; i++) {
-    ctx.fillText(wrappedLines[i], textX, boxY + headerH + 8 + i * lineHeight);
+    ctx.fillText(wrappedLines[i], textX, insetY + 10 + i * lineHeight);
   }
 
   // Options (clickable list)
   if (options.length > 0) {
-    const optStartY = boxY + headerH + 8 + textH + 10;
-    ctx.font = "13px Inter, system-ui, sans-serif";
+    const optStartY = insetY + 10 + textH + 10;
+    ctx.font = '13px "Dotum", Arial, sans-serif';
 
     for (let i = 0; i < options.length; i++) {
       const optY = optStartY + i * optionLineHeight;
       const isHovered = d.hoveredOption === i;
 
-      // Option background highlight on hover
       if (isHovered) {
-        ctx.fillStyle = "rgba(255, 200, 50, 0.15)";
-        ctx.fillRect(textX - 4, optY - 2, textAreaW + 8, optionLineHeight);
+        ctx.fillStyle = "rgba(74, 100, 144, 0.15)";
+        roundRect(ctx, textX - 4, optY - 2, textAreaW + 8, optionLineHeight, 2);
+        ctx.fill();
       }
 
-      // Option bullet + label
-      ctx.fillStyle = isHovered ? "#fbbf24" : "#93c5fd";
+      ctx.fillStyle = isHovered ? "#4a6490" : "#2a3650";
+      ctx.font = isHovered ? 'bold 13px "Dotum", Arial, sans-serif' : '13px "Dotum", Arial, sans-serif';
       ctx.fillText(`▸ ${options[i].label}`, textX + 4, optY + 4);
 
-      // Store hit box for click detection
       _npcDialogueOptionHitBoxes.push({
         x: textX - 4,
         y: optY - 2,
@@ -3384,14 +3420,14 @@ function drawNpcDialogue() {
   }
 
   // Footer hint
-  ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
-  ctx.font = "11px Inter, system-ui, sans-serif";
+  ctx.fillStyle = "#6b82a8";
+  ctx.font = '11px "Dotum", Arial, sans-serif';
   ctx.textAlign = "center";
   if (isOptionLine) {
-    ctx.fillText("Click an option or press Escape to close", boxX + boxW / 2, boxY + boxH - 12);
+    ctx.fillText("Click an option or press Escape to close", boxX + boxW / 2, boxY + boxH - 10);
   } else {
     const pageInfo = d.lines.length > 1 ? ` (${d.lineIndex + 1}/${d.lines.length})` : "";
-    ctx.fillText(`Click or press Enter to continue${pageInfo}`, boxX + boxW / 2, boxY + boxH - 16);
+    ctx.fillText(`Click or press Enter to continue${pageInfo}`, boxX + boxW / 2, boxY + boxH - 14);
   }
 
   ctx.restore();
@@ -3422,15 +3458,20 @@ function wrapText(ctx, text, maxWidth) {
 /**
  * Draw a rounded rectangle path (does NOT fill/stroke — caller does that).
  */
-function roundRect(ctx, x, y, w, h, r) {
+function roundRect(ctx, x, y, w, h, r, topOnly = false) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.lineTo(x + w - r, y);
   ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  if (topOnly) {
+    ctx.lineTo(x + w, y + h);
+    ctx.lineTo(x, y + h);
+  } else {
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  }
   ctx.lineTo(x, y + r);
   ctx.quadraticCurveTo(x, y, x + r, y);
   ctx.closePath();
