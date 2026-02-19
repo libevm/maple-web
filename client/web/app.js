@@ -9040,11 +9040,12 @@ function drawLoadingScreen() {
     ctx.fill();
   }
 
-  // Percentage label
+  // Status label (verbose) + percentage
   const pct = Math.round(progress * 100);
-  ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
+  const statusText = runtime.loading.label || "Preparing assets";
+  ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
   ctx.font = "400 11px -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
-  ctx.fillText(`${pct}%`, cw / 2, y + 28);
+  ctx.fillText(`${statusText}  —  ${pct}%`, cw / 2, y + 28);
 
   ctx.restore();
 }
