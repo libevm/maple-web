@@ -7086,8 +7086,10 @@ function drawChatBubble() {
 
   ctx.fillStyle = "#f8fafc";
   ctx.textBaseline = "top";
+  const textBlockHeight = lines.length * CHAT_BUBBLE_LINE_HEIGHT;
+  const textOffsetY = (height - textBlockHeight) / 2;
   for (let index = 0; index < lines.length; index += 1) {
-    const lineY = y + CHAT_BUBBLE_VERTICAL_PADDING + index * CHAT_BUBBLE_LINE_HEIGHT;
+    const lineY = y + textOffsetY + index * CHAT_BUBBLE_LINE_HEIGHT;
     ctx.fillText(lines[index], clampedX + CHAT_BUBBLE_HORIZONTAL_PADDING, lineY);
   }
 
