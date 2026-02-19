@@ -158,7 +158,7 @@ const CHAT_BUBBLE_LINE_HEIGHT = 16;
 const CHAT_BUBBLE_HORIZONTAL_PADDING = 8;
 const CHAT_BUBBLE_VERTICAL_PADDING = 6;
 const CHAT_BUBBLE_STANDARD_WIDTH_MULTIPLIER = 3;
-const STATUSBAR_HEIGHT = 34;
+const STATUSBAR_HEIGHT = 0;
 const STATUSBAR_BAR_HEIGHT = 14;
 const STATUSBAR_PADDING_H = 10;
 
@@ -998,15 +998,11 @@ function applyFixedRes() {
     }
     wrapper.style.setProperty("--fixed-w", displayW + "px");
     wrapper.style.setProperty("--fixed-h", displayH + "px");
-    // Scale status bar height from canvas pixels to CSS pixels
-    const statusBarCss = Math.round(STATUSBAR_HEIGHT / DEFAULT_CANVAS_HEIGHT * displayH);
-    wrapper.style.setProperty("--statusbar-h", statusBarCss + "px");
     wrapper.classList.add("fixed-res");
   } else {
     wrapper.classList.remove("fixed-res");
     wrapper.style.removeProperty("--fixed-w");
     wrapper.style.removeProperty("--fixed-h");
-    wrapper.style.setProperty("--statusbar-h", STATUSBAR_HEIGHT + "px");
   }
   syncCanvasResolution();
 }
@@ -7620,7 +7616,6 @@ function render() {
   drawVRBoundsOverflowMask();
   drawChatBubble();
   drawPlayerNameLabel();
-  drawStatusBar();
   drawMapBanner();
   drawMinimap();
   drawNpcDialogue();

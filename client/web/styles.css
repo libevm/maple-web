@@ -508,14 +508,13 @@ button {
 /* ── Chat bar (bottom text input) ── */
 .chat-bar {
   position: absolute;
-  bottom: var(--statusbar-h, 34px);
+  bottom: 8px;
   left: 0;
   right: 0;
   display: flex;
   align-items: center;
   padding: 6px 10px;
-  background: #0a0f1e;
-  border-top: 1px solid #334155;
+  background: transparent;
   z-index: 20;
 }
 
@@ -529,9 +528,9 @@ button {
   flex: 1;
   min-width: 0;
   padding: 5px 10px;
-  border: 1px solid #475569;
+  border: 1px solid rgba(71, 85, 105, 0.6);
   border-radius: 4px;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.75);
   color: #000;
   font-size: 13px;
   font-family: inherit;
@@ -549,7 +548,7 @@ button {
 /* ── Chat log (history overlay) ── */
 .chat-log {
   position: absolute;
-  bottom: calc(var(--statusbar-h, 34px) + 38px);
+  bottom: 46px;
   left: 0;
   right: 0;
   height: 140px;
