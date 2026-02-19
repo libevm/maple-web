@@ -20,12 +20,15 @@ body {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 #map-canvas {
   display: block;
   width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   background: #000;
 }
 
@@ -44,7 +47,8 @@ body:has(.canvas-wrapper.fixed-res) {
 
 .canvas-wrapper.fixed-res #map-canvas {
   width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   image-rendering: auto;
 }
 
@@ -507,14 +511,11 @@ button {
 
 /* ── Chat bar (bottom text input) ── */
 .chat-bar {
-  position: absolute;
-  bottom: 8px;
-  left: 0;
-  right: 0;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
-  padding: 6px 10px;
-  background: transparent;
+  padding: 4px 10px;
+  background: #0a0f1eee;
   z-index: 20;
 }
 
@@ -530,7 +531,7 @@ button {
   padding: 5px 10px;
   border: 1px solid rgba(71, 85, 105, 0.6);
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.75);
+  background: #fff;
   color: #000;
   font-size: 13px;
   font-family: inherit;
@@ -545,10 +546,10 @@ button {
   color: rgba(0, 0, 0, 0.4);
 }
 
-/* ── Chat log (history overlay) ── */
+/* ── Chat log (history overlay — floats above chat bar, doesn't affect canvas size) ── */
 .chat-log {
   position: absolute;
-  bottom: 46px;
+  bottom: 34px;
   left: 0;
   right: 0;
   height: 140px;

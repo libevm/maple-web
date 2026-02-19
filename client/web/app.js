@@ -167,6 +167,7 @@ const TELEPORT_PRESET_CACHE_KEY = "mapleweb.debug.teleportPreset.v1";
 const SETTINGS_CACHE_KEY = "mapleweb.settings.v1";
 const STAT_CACHE_KEY = "mapleweb.debug.playerStats.v1";
 const CHAT_LOG_HEIGHT_CACHE_KEY = "mapleweb.debug.chatLogHeight.v1";
+const CHAT_LOG_COLLAPSED_KEY = "mapleweb.chatLogCollapsed.v1";
 const KEYBINDS_STORAGE_KEY = "mapleweb.keybinds.v1";
 
 // Some map IDs are absent in the extracted client dataset. Redirect these to
@@ -725,24 +726,42 @@ function initChatLogResize() {
   if (cached) {
     const h = Number(cached);
     if (Number.isFinite(h) && h >= 48) {
-      chatLogEl.style.height = h + "px";
       chatLogExpandedHeight = h;
     }
   }
 
   const HANDLE_HEIGHT = 14;
 
+  function saveChatLogState() {
+    try {
+      localStorage.setItem(CHAT_LOG_HEIGHT_CACHE_KEY, String(chatLogExpandedHeight));
+      localStorage.setItem(CHAT_LOG_COLLAPSED_KEY, chatLogCollapsed ? "1" : "0");
+    } catch { /* ignore */ }
+  }
+
   function collapseChatLog() {
     chatLogExpandedHeight = chatLogEl.offsetHeight || chatLogExpandedHeight;
     chatLogCollapsed = true;
     chatLogEl.style.height = HANDLE_HEIGHT + "px";
     chatLogEl.style.minHeight = HANDLE_HEIGHT + "px";
+    saveChatLogState();
   }
 
   function expandChatLog() {
     chatLogCollapsed = false;
     chatLogEl.style.height = chatLogExpandedHeight + "px";
     chatLogEl.style.minHeight = "";
+    saveChatLogState();
+  }
+
+  // Restore collapsed state
+  const savedCollapsed = localStorage.getItem(CHAT_LOG_COLLAPSED_KEY);
+  if (savedCollapsed === "1") {
+    chatLogCollapsed = true;
+    chatLogEl.style.height = HANDLE_HEIGHT + "px";
+    chatLogEl.style.minHeight = HANDLE_HEIGHT + "px";
+  } else {
+    chatLogEl.style.height = chatLogExpandedHeight + "px";
   }
 
   let dragging = false;
@@ -764,9 +783,6 @@ function initChatLogResize() {
     } else {
       collapseChatLog();
     }
-    try {
-      localStorage.setItem(CHAT_LOG_HEIGHT_CACHE_KEY, String(chatLogExpandedHeight));
-    } catch { /* ignore */ }
   });
 
   window.addEventListener("pointermove", (e) => {
@@ -787,9 +803,7 @@ function initChatLogResize() {
     if (!chatLogCollapsed) {
       chatLogExpandedHeight = chatLogEl.offsetHeight || chatLogExpandedHeight;
     }
-    try {
-      localStorage.setItem(CHAT_LOG_HEIGHT_CACHE_KEY, String(chatLogExpandedHeight));
-    } catch { /* ignore */ }
+    saveChatLogState();
   });
 }
 
@@ -1015,8 +1029,10 @@ function syncCanvasResolution() {
     nextWidth = FIXED_RES_WIDTH;
     nextHeight = FIXED_RES_HEIGHT;
   } else {
-    nextWidth = window.innerWidth || DEFAULT_CANVAS_WIDTH;
-    nextHeight = window.innerHeight || DEFAULT_CANVAS_HEIGHT;
+    // Use the canvas element's CSS-rendered size (accounts for chat bar flex layout)
+    const rect = canvasEl.getBoundingClientRect();
+    nextWidth = Math.round(rect.width) || window.innerWidth || DEFAULT_CANVAS_WIDTH;
+    nextHeight = Math.round(rect.height) || window.innerHeight || DEFAULT_CANVAS_HEIGHT;
   }
 
   nextWidth = Math.max(MIN_CANVAS_WIDTH, nextWidth);
