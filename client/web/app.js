@@ -403,37 +403,23 @@ const runtime = {
 
 const equipWindowEl = document.getElementById("equip-window");
 const inventoryWindowEl = document.getElementById("inventory-window");
+const keybindsWindowEl = document.getElementById("keybinds-window");
 const equipGridEl = document.getElementById("equip-grid");
 const invGridEl = document.getElementById("inv-grid");
+const keybindsGridEl = document.getElementById("keybinds-grid");
 const uiTooltipEl = document.getElementById("ui-tooltip");
+const openKeybindsBtnEl = document.getElementById("open-keybinds-btn");
 
-// Layout matching WZ Equip background (5 cols × 7 rows grid)
-// Row/col positions correspond to the pre-drawn slot rectangles in the WZ background
-const EQUIP_COLS = 5;
-const EQUIP_ROWS = 7;
-const EQUIP_SLOT_LAYOUT = [
-  // Row 0
-  { type: "Cap",       col: 1, row: 0 },
-  { type: "Forehead",  col: 2, row: 0 },
-  { type: "Ring",      col: 4, row: 0 },
-  // Row 1
-  { type: "Medal",     col: 0, row: 1 },
-  { type: "Accessory", col: 1, row: 1 },
-  { type: "Pendant",   col: 3, row: 1 },
-  { type: "Shield",    col: 4, row: 1 },
-  { type: "Cape",      col: 0, row: 2 },
-  // Row 2
-  { type: "Coat",      col: 2, row: 2 },
-  { type: "Weapon",    col: 4, row: 2 },
-  // Row 3
-  { type: "Glove",     col: 0, row: 3 },
-  { type: "Belt",      col: 2, row: 3 },
-  { type: "Ring2",     col: 3, row: 3 },
-  // Row 4
-  { type: "Pants",     col: 1, row: 4 },
-  { type: "Shoes",     col: 2, row: 4 },
-  // Row 5 (Taming Mob / Mob Equip / Pet / Pet Equip / Pet HP)
-  // Row 6 (Saddle)
+// Equip slots as flat 4-column grid
+const EQUIP_SLOT_LIST = [
+  { type: "Cap",       label: "Hat" },
+  { type: "Cape",      label: "Cape" },
+  { type: "Coat",      label: "Top" },
+  { type: "Shield",    label: "Shield" },
+  { type: "Glove",     label: "Gloves" },
+  { type: "Pants",     label: "Bottom" },
+  { type: "Shoes",     label: "Shoes" },
+  { type: "Weapon",    label: "Weapon" },
 ];
 
 const INV_COLS = 4;
@@ -596,17 +582,11 @@ function refreshUIWindows() {
 function refreshEquipGrid() {
   if (!equipGridEl) return;
   equipGridEl.innerHTML = "";
-  const total = EQUIP_COLS * EQUIP_ROWS;
-  const cells = new Array(total).fill(null);
-  for (const slot of EQUIP_SLOT_LAYOUT) {
-    const idx = slot.row * EQUIP_COLS + slot.col;
+  for (const slot of EQUIP_SLOT_LIST) {
     const equipped = playerEquipped.get(slot.type);
     const iconUri = equipped ? getIconDataUri(equipped.iconKey) : null;
     const tooltip = equipped?.name || null;
-    cells[idx] = buildSlotEl(iconUri, null, 0, tooltip);
-  }
-  for (let i = 0; i < total; i++) {
-    equipGridEl.appendChild(cells[i] || buildSlotEl(null, null, 0, null));
+    equipGridEl.appendChild(buildSlotEl(iconUri, slot.label, 0, tooltip));
   }
 }
 
@@ -645,16 +625,26 @@ function hideTooltip() {
   if (uiTooltipEl) uiTooltipEl.classList.add("hidden");
 }
 
+function getUIWindowEl(key) {
+  if (key === "equip") return equipWindowEl;
+  if (key === "inventory") return inventoryWindowEl;
+  if (key === "keybinds") return keybindsWindowEl;
+  return null;
+}
+
 function toggleUIWindow(key) {
-  const el = key === "equip" ? equipWindowEl : inventoryWindowEl;
+  const el = getUIWindowEl(key);
   if (!el) return;
   const isHidden = el.classList.contains("hidden");
   el.classList.toggle("hidden");
-  if (isHidden) refreshUIWindows();
+  if (isHidden) {
+    refreshUIWindows();
+    if (key === "keybinds") buildKeybindsUI();
+  }
 }
 
 function isUIWindowVisible(key) {
-  const el = key === "equip" ? equipWindowEl : inventoryWindowEl;
+  const el = getUIWindowEl(key);
   return el && !el.classList.contains("hidden");
 }
 
@@ -698,52 +688,6 @@ async function loadCursorAssets() {
 }
 
 /** Load WZ UI backgrounds and close button sprites */
-async function loadUIWindowAssets() {
-  try {
-    const uiJson = await fetchJson("/resources/UI.wz/UIWindow.img.json");
-    const basicJson = await fetchJson("/resources/UI.wz/Basic.img.json");
-
-    // Equip background
-    const equipNode = uiJson?.$$?.find(c => c.$imgdir === "Equip");
-    const equipBg = equipNode?.$$?.find(c => (c.$imgdir ?? c.$canvas) === "backgrnd");
-    if (equipBg?.basedata) {
-      const img = document.createElement("img");
-      img.src = `data:image/png;base64,${equipBg.basedata}`;
-      img.draggable = false;
-      document.getElementById("equip-bg")?.appendChild(img);
-    }
-
-    // Item/Inventory background
-    const itemNode = uiJson?.$$?.find(c => c.$imgdir === "Item");
-    const itemBg = itemNode?.$$?.find(c => (c.$imgdir ?? c.$canvas) === "backgrnd");
-    if (itemBg?.basedata) {
-      const img = document.createElement("img");
-      img.src = `data:image/png;base64,${itemBg.basedata}`;
-      img.draggable = false;
-      document.getElementById("inv-bg")?.appendChild(img);
-    }
-
-    // Close button from Basic.img BtClose
-    const btClose = basicJson?.$$?.find(c => c.$imgdir === "BtClose");
-    const normalState = btClose?.$$?.find(c => c.$imgdir === "normal");
-    const closeFrame = normalState?.$$?.find(c => c.basedata);
-    if (closeFrame?.basedata) {
-      const src = `data:image/png;base64,${closeFrame.basedata}`;
-      for (const id of ["equip-close-btn", "inv-close-btn"]) {
-        const btn = document.getElementById(id);
-        if (btn) {
-          const img = document.createElement("img");
-          img.src = src;
-          img.draggable = false;
-          btn.appendChild(img);
-        }
-      }
-    }
-  } catch (e) {
-    console.warn("[ui] Failed to load UI window assets", e);
-  }
-}
-
 // ── Dragging ──
 let _dragWin = null;
 let _dragOffX = 0;
@@ -753,7 +697,7 @@ function initUIWindowDrag() {
   for (const titlebar of document.querySelectorAll(".game-window-titlebar")) {
     titlebar.addEventListener("pointerdown", (e) => {
       const winId = titlebar.dataset.window;
-      const winEl = winId === "equip" ? equipWindowEl : inventoryWindowEl;
+      const winEl = getUIWindowEl(winId);
       if (!winEl) return;
       e.preventDefault();
       _dragWin = winEl;
@@ -766,7 +710,7 @@ function initUIWindowDrag() {
   for (const closeBtn of document.querySelectorAll(".game-window-close")) {
     closeBtn.addEventListener("click", () => {
       const key = closeBtn.dataset.close;
-      const el = key === "equip" ? equipWindowEl : inventoryWindowEl;
+      const el = getUIWindowEl(key);
       if (el) el.classList.add("hidden");
     });
   }
@@ -783,6 +727,54 @@ function initUIWindowDrag() {
   });
 
   window.addEventListener("pointerup", () => { _dragWin = null; });
+
+  // "Configure Key Bindings" button in settings opens the keybinds window
+  openKeybindsBtnEl?.addEventListener("click", () => {
+    // Close settings modal
+    const modal = document.getElementById("settings-modal");
+    if (modal) modal.classList.add("hidden");
+    toggleUIWindow("keybinds");
+    canvasEl.focus();
+  });
+}
+
+// ── Keybind labels ──
+const KEYBIND_LABELS = {
+  attack: "Attack",
+  jump: "Jump",
+  equip: "Equipment",
+  inventory: "Inventory",
+  face1: "😣 Pain",
+  face2: "😊 Happy",
+  face3: "😟 Troubled",
+  face4: "😢 Cry",
+  face5: "😠 Angry",
+  face6: "😲 Surprised",
+  face7: "😵 Shocked",
+};
+
+function buildKeybindsUI() {
+  if (!keybindsGridEl) return;
+  keybindsGridEl.innerHTML = "";
+  for (const [action, label] of Object.entries(KEYBIND_LABELS)) {
+    const row = document.createElement("div");
+    row.className = "kb-row";
+
+    const lbl = document.createElement("span");
+    lbl.className = "kb-label";
+    lbl.textContent = label;
+
+    const btn = document.createElement("button");
+    btn.className = "keybind-btn";
+    btn.dataset.action = action;
+    btn.textContent = keyCodeToDisplay(runtime.keybinds[action]);
+    btn.title = "Click to rebind";
+    btn.addEventListener("click", () => startKeybindListening(btn));
+
+    row.appendChild(lbl);
+    row.appendChild(btn);
+    keybindsGridEl.appendChild(row);
+  }
 }
 
 let canvasResizeObserver = null;
@@ -819,8 +811,9 @@ function syncDebugTogglesFromUi() {
 
   if (debugUISlotsToggleEl) {
     const show = !!debugUISlotsToggleEl.checked;
-    equipWindowEl?.classList.toggle("debug-slots", show);
-    inventoryWindowEl?.classList.toggle("debug-slots", show);
+    for (const el of [equipWindowEl, inventoryWindowEl, keybindsWindowEl]) {
+      el?.classList.toggle("debug-slots", show);
+    }
   }
 
   if (debugFpsToggleEl) {
@@ -8811,10 +8804,11 @@ function bindInput() {
         return;
       }
       // Close any open UI windows
-      if (isUIWindowVisible("equip") || isUIWindowVisible("inventory")) {
+      if (isUIWindowVisible("equip") || isUIWindowVisible("inventory") || isUIWindowVisible("keybinds")) {
         event.preventDefault();
         if (equipWindowEl) equipWindowEl.classList.add("hidden");
         if (inventoryWindowEl) inventoryWindowEl.classList.add("hidden");
+        if (keybindsWindowEl) keybindsWindowEl.classList.add("hidden");
         return;
       }
     }
@@ -8984,7 +8978,6 @@ initPlayerEquipment();
 initPlayerInventory();
 initUIWindowDrag();
 refreshUIWindows();
-void loadUIWindowAssets();
 void loadCursorAssets();
 initializeTeleportPresetInputs();
 initializeStatInputs();

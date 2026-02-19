@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Maple Web Client Preview</title>
     <link rel="stylesheet" href="/styles.css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        corePlugins: { preflight: false },
+      };
+    </script>
   </head>
   <body>
     <div class="canvas-wrapper">
@@ -56,52 +62,7 @@
 
           <section class="settings-section">
             <h3>Key Bindings</h3>
-            <div class="settings-keybinds">
-              <div class="keybind-row">
-                <span class="keybind-label">Attack</span>
-                <button class="keybind-btn" data-action="attack" title="Click to rebind">C</button>
-              </div>
-              <div class="keybind-row">
-                <span class="keybind-label">Jump</span>
-                <button class="keybind-btn" data-action="jump" title="Click to rebind">Space</button>
-              </div>
-              <div class="keybind-row">
-                <span class="keybind-label">Equipment</span>
-                <button class="keybind-btn" data-action="equip" title="Click to rebind">E</button>
-              </div>
-              <div class="keybind-row">
-                <span class="keybind-label">Inventory</span>
-                <button class="keybind-btn" data-action="inventory" title="Click to rebind">I</button>
-              </div>
-              <div class="keybind-row">
-                <span class="keybind-label">😣 Pain</span>
-                <button class="keybind-btn" data-action="face1" title="Click to rebind">1</button>
-              </div>
-              <div class="keybind-row">
-                <span class="keybind-label">😊 Happy</span>
-                <button class="keybind-btn" data-action="face2" title="Click to rebind">2</button>
-              </div>
-              <div class="keybind-row">
-                <span class="keybind-label">😟 Troubled</span>
-                <button class="keybind-btn" data-action="face3" title="Click to rebind">3</button>
-              </div>
-              <div class="keybind-row">
-                <span class="keybind-label">😢 Cry</span>
-                <button class="keybind-btn" data-action="face4" title="Click to rebind">4</button>
-              </div>
-              <div class="keybind-row">
-                <span class="keybind-label">😠 Angry</span>
-                <button class="keybind-btn" data-action="face5" title="Click to rebind">5</button>
-              </div>
-              <div class="keybind-row">
-                <span class="keybind-label">😲 Surprised</span>
-                <button class="keybind-btn" data-action="face6" title="Click to rebind">6</button>
-              </div>
-              <div class="keybind-row">
-                <span class="keybind-label">😵 Shocked</span>
-                <button class="keybind-btn" data-action="face7" title="Click to rebind">7</button>
-              </div>
-            </div>
+            <button id="open-keybinds-btn" type="button" style="width:100%">Configure Key Bindings</button>
           </section>
         </div>
       </div>
@@ -199,21 +160,29 @@
         </div>
       </aside>
 
-      <!-- In-game UI windows (MapleStory WZ-themed) -->
-      <div id="equip-window" class="game-window hidden">
-        <div class="game-window-bg" id="equip-bg"></div>
+      <!-- In-game UI windows -->
+      <div id="equip-window" class="game-window hidden" style="top:80px;left:50px">
         <div class="game-window-titlebar" data-window="equip">
-          <button class="game-window-close" data-close="equip" id="equip-close-btn"></button>
+          <span class="game-window-title">Equipment</span>
+          <button class="game-window-close" data-close="equip">&times;</button>
         </div>
-        <div class="game-window-body equip-grid" id="equip-grid"></div>
+        <div id="equip-grid" class="equip-grid"></div>
       </div>
 
-      <div id="inventory-window" class="game-window hidden" style="left: 230px">
-        <div class="game-window-bg" id="inv-bg"></div>
+      <div id="inventory-window" class="game-window hidden" style="top:80px;left:230px">
         <div class="game-window-titlebar" data-window="inventory">
-          <button class="game-window-close" data-close="inventory" id="inv-close-btn"></button>
+          <span class="game-window-title">Item Inventory</span>
+          <button class="game-window-close" data-close="inventory">&times;</button>
         </div>
-        <div class="game-window-body inv-grid" id="inv-grid"></div>
+        <div id="inv-grid" class="inv-grid"></div>
+      </div>
+
+      <div id="keybinds-window" class="game-window hidden" style="top:60px;left:100px">
+        <div class="game-window-titlebar" data-window="keybinds">
+          <span class="game-window-title">Key Bindings</span>
+          <button class="game-window-close" data-close="keybinds">&times;</button>
+        </div>
+        <div id="keybinds-grid" class="keybinds-grid"></div>
       </div>
 
       <div id="ui-tooltip" class="ui-tooltip hidden"></div>

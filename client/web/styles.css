@@ -623,15 +623,17 @@ button {
   font-style: italic;
 }
 
-/* ── In-game UI windows (Equipment / Inventory) ── */
+/* ── In-game UI windows ── */
 .game-window {
   position: absolute;
   z-index: 25;
-  top: 80px;
-  left: 50px;
   user-select: none;
   -webkit-user-select: none;
-  image-rendering: pixelated;
+  background: linear-gradient(180deg, #d4dce8 0%, #c0cbdb 100%);
+  border: 2px solid #8a9bb5;
+  border-radius: 4px;
+  box-shadow: 1px 2px 6px rgba(0,0,0,0.35);
+  font-family: "Dotum", "Arial", sans-serif;
   cursor: var(--cursor-default, auto);
 }
 
@@ -639,32 +641,15 @@ button {
   display: none;
 }
 
-/* Use actual WZ background as window chrome */
-.game-window-bg {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  image-rendering: pixelated;
-}
-
-.game-window-bg img {
-  width: 100%;
-  height: 100%;
-  image-rendering: pixelated;
-  display: block;
-}
-
 .game-window-titlebar {
-  position: absolute;
-  z-index: 2;
-  top: 0;
-  left: 0;
-  right: 0;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  height: 16px;
-  padding: 0 2px;
+  justify-content: space-between;
+  height: 22px;
+  padding: 0 4px 0 8px;
+  background: linear-gradient(180deg, #6b82a8 0%, #4a6490 100%);
+  border-bottom: 1px solid #3d5578;
+  border-radius: 2px 2px 0 0;
   cursor: grab;
 }
 
@@ -672,110 +657,59 @@ button {
   cursor: grabbing;
 }
 
+.game-window-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.5);
+  letter-spacing: 0.02em;
+}
+
 .game-window-close {
-  width: 13px;
-  height: 13px;
+  width: 16px;
+  height: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: none;
-  border-radius: 0;
-  background: none;
+  border: 1px solid #555;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #e0e0e0, #b0b0b0);
+  color: #333;
+  font-size: 12px;
+  font-weight: bold;
+  line-height: 1;
   cursor: pointer;
   padding: 0;
-  image-rendering: pixelated;
-  opacity: 0.7;
-  transition: opacity 0.1s;
 }
 
 .game-window-close:hover {
-  opacity: 1;
-  background: none;
+  background: linear-gradient(180deg, #f0f0f0, #c8c8c8);
+  color: #000;
 }
 
-.game-window-close img {
-  width: 12px;
-  height: 12px;
-  image-rendering: pixelated;
-}
-
-.game-window-body {
-  position: relative;
-  z-index: 1;
-}
-
-/* ── Equip window: sized to match WZ background 175×304 ── */
-#equip-window {
-  width: 175px;
-  height: 304px;
-}
-
-#equip-window .game-window-titlebar {
-  height: 16px;
-}
-
-#equip-window .game-window-body {
-  padding: 0;
-  position: absolute;
-  top: 21px;
-  left: 7px;
-}
-
+/* ── Equip grid ── */
 .equip-grid {
   display: grid;
-  grid-template-columns: repeat(5, 32px);
-  grid-template-rows: repeat(7, 38px);
-  gap: 0;
+  grid-template-columns: repeat(4, 36px);
+  gap: 2px;
+  padding: 6px;
 }
 
-/* Hide labels in equip grid — the WZ background already has them */
-.equip-grid .slot-label {
-  display: none;
-}
-
-/* Debug: show slot boundaries */
-.game-window.debug-slots .item-slot {
-  outline: 1px solid rgba(255, 0, 0, 0.6);
-  background: rgba(255, 0, 0, 0.08);
-}
-
-.game-window.debug-slots .item-slot:nth-child(even) {
-  outline-color: rgba(0, 0, 255, 0.6);
-  background: rgba(0, 0, 255, 0.08);
-}
-
-/* ── Inventory window: sized to match WZ background 175×289 ── */
-#inventory-window {
-  width: 175px;
-  height: 289px;
-}
-
-#inventory-window .game-window-titlebar {
-  height: 16px;
-}
-
-#inventory-window .game-window-body {
-  padding: 0;
-  position: absolute;
-  top: 40px;
-  left: 7px;
-}
-
+/* ── Inventory grid ── */
 .inv-grid {
   display: grid;
-  grid-template-columns: repeat(4, 39px);
-  grid-template-rows: repeat(6, 38px);
-  gap: 0;
-  padding: 0;
+  grid-template-columns: repeat(4, 36px);
+  gap: 2px;
+  padding: 6px;
 }
 
 /* ── Item slot ── */
 .item-slot {
-  width: 100%;
-  height: 100%;
-  border: none;
-  border-radius: 0;
-  background: transparent;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #9aa8bc;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #e8edf4 0%, #d8dfe9 100%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -784,50 +718,98 @@ button {
 }
 
 .item-slot:hover {
-  background: rgba(100, 160, 255, 0.15);
+  background: linear-gradient(180deg, #f0f4ff 0%, #dce4f4 100%);
+  border-color: #6888b8;
 }
 
 .item-slot.empty {
-  background: transparent;
+  background: linear-gradient(180deg, #dde3ec 0%, #cdd5e2 100%);
+  border-color: #aab5c8;
 }
 
 .item-slot img {
-  max-width: 30px;
-  max-height: 30px;
+  max-width: 32px;
+  max-height: 32px;
   image-rendering: pixelated;
   pointer-events: none;
 }
 
 .item-slot .slot-label {
-  font-size: 7px;
-  color: rgba(80, 100, 130, 0.6);
+  font-size: 8px;
+  color: #8090a8;
   text-align: center;
-  line-height: 1;
+  line-height: 1.1;
   pointer-events: none;
-  font-family: "Dotum", "Arial", sans-serif;
 }
 
 .item-slot .slot-qty {
   position: absolute;
-  bottom: 0;
+  bottom: 1px;
   right: 2px;
   font-size: 9px;
   font-weight: 700;
-  color: #333;
-  text-shadow: none;
+  color: #fff;
+  text-shadow: 0 0 2px #000, 0 1px 1px #000;
   pointer-events: none;
-  font-family: "Dotum", "Arial", sans-serif;
 }
 
-/* ── Tooltip (MapleStory style) ── */
+/* ── Keybinds grid ── */
+.keybinds-grid {
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 200px;
+}
+
+.keybinds-grid .kb-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.keybinds-grid .kb-label {
+  font-size: 11px;
+  color: #2a3650;
+  white-space: nowrap;
+}
+
+.keybinds-grid .keybind-btn {
+  min-width: 56px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-family: monospace;
+  text-align: center;
+  border: 1px solid #8a9bb5;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #eef1f6, #d8dee8);
+  color: #2a3650;
+  cursor: pointer;
+}
+
+.keybinds-grid .keybind-btn:hover {
+  background: linear-gradient(180deg, #f4f6fa, #e0e6f0);
+  border-color: #6080b0;
+}
+
+.keybinds-grid .keybind-btn.listening {
+  border-color: #d4a020;
+  background: #fff8e0;
+  color: #8a6800;
+  animation: keybind-pulse 0.8s infinite;
+}
+
+/* ── Tooltip ── */
 .ui-tooltip {
   position: absolute;
   z-index: 30;
   padding: 4px 8px;
-  border: 1px solid #463a2b;
-  background: #efe8d5;
-  box-shadow: 1px 1px 0 #000;
-  color: #000;
+  border: 1px solid #8a9bb5;
+  border-radius: 3px;
+  background: #f0eee4;
+  box-shadow: 1px 1px 4px rgba(0,0,0,0.3);
+  color: #222;
   font-size: 11px;
   font-family: "Dotum", "Arial", sans-serif;
   line-height: 1.4;
@@ -837,4 +819,13 @@ button {
 
 .ui-tooltip.hidden {
   display: none;
+}
+
+/* ── Debug: show slot boundaries ── */
+.game-window.debug-slots .item-slot {
+  outline: 1px solid rgba(255, 0, 0, 0.6);
+}
+
+.game-window.debug-slots .item-slot:nth-child(even) {
+  outline-color: rgba(0, 0, 255, 0.6);
 }
