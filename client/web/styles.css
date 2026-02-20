@@ -1134,17 +1134,6 @@ button {
   0%, 100% { transform: translate(30%, -30%) scale(1); }
   50% { transform: translate(30%, -30%) scale(1.2); }
 }
-.claim-hud-wide {
-  width: auto !important;
-  padding: 0 10px !important;
-  gap: 5px;
-}
-.claim-btn-label {
-  font-size: 11px;
-  font-weight: 700;
-  font-family: "Dotum", "Arial", sans-serif;
-  letter-spacing: 0.3px;
-}
 .claim-hud-glow:not(.hud-hidden) {
   animation: claim-pulse 1.5s ease-in-out infinite;
   border-color: rgba(251, 191, 36, 0.6) !important;
