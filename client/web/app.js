@@ -3217,6 +3217,11 @@ function tryLootDrop() {
     );
     if (rectsOverlap(pBounds, dropBounds)) {
       if (_wsConnected) {
+        // Loot ownership: skip if owned by someone else and less than 5s old
+        if (drop.ownerId && drop.ownerId !== sessionId) {
+          const age = Date.now() - drop.serverCreatedAt;
+          if (age < 5000) continue; // not our drop yet — try next
+        }
         // Online: ask server to loot — server broadcasts drop_loot to all
         wsSend({ type: "loot_item", drop_id: drop.drop_id });
         return; // Wait for server confirmation
@@ -3379,6 +3384,8 @@ function createDropFromServer(dropData, animate) {
     angle: 0,
     bobPhase: 0,
     spawnTime: performance.now(),
+    serverCreatedAt: dropData.created_at || Date.now(),
+    ownerId: dropData.owner_id || "",
     pickingUp: false,
     pickupStart: 0,
     expiring: false,
