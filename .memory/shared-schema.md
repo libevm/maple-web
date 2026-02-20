@@ -432,8 +432,24 @@ Possible reasons:
 { "type": "reactor_destroy", "reactor_idx": 0 }
 ```
 - Followed by `drop_spawn` with server-rolled loot
+- `drop_spawn.drop.owner_id` = majority damage dealer (loot priority)
 
-### `reactor_respawn` — Reactor respawned after 30s (server → room)
+### `loot_failed` — Server rejects loot attempt (server → requester only)
+```json
+{ "type": "loot_failed", "drop_id": 123, "reason": "owned", "owner_id": "abc", "remaining_ms": 3200 }
+{ "type": "loot_failed", "drop_id": 123, "reason": "not_found" }
+{ "type": "loot_failed", "drop_id": 123, "reason": "already_looted" }
+```
+- `owned`: another player has loot priority, protection hasn't expired
+- `not_found` / `already_looted`: client should remove drop from groundDrops
+
+### Loot Ownership Rules
+- **Reactor/mob drops**: `owner_id` = majority damage dealer. Owner has 5s exclusive pickup.
+- **Player-dropped items**: `owner_id` = `""` (no protection, anyone can loot immediately).
+- Server enforces via `loot_item` handler: checks `owner_id` + `created_at` age < 5s.
+- Client pre-checks locally to avoid pointless requests (uses `drop.createdAt` local timestamp).
+
+### `reactor_respawn` — Reactor respawned after 10s (server → room)
 ```json
 { "type": "reactor_respawn", "reactor_idx": 0, "reactor_id": "0002001", "x": -400, "y": 252 }
 ```

@@ -386,11 +386,14 @@ Life sprite frames extract basedata into separate objects, so deleting `frame.ba
 - `ReactorBreak` — state 3 hit sound (destruction) from same file `> 3 > Hit`
 - Preloaded in `preloadUISounds()`
 
-### Reactor Drop Landing
+### Reactor Drop Landing & Loot Ownership
 
 - `createDropFromServer` uses `findFootholdAtXNearY`/`findFootholdBelow` for destY
 - Same foothold detection as user-dropped items (with -4px offset)
 - Server destY is only a hint; client recalculates locally
+- Drops store `ownerId` (from server `owner_id`) and `createdAt` (client `Date.now()`)
+- `tryLootDrop()` skips drops where `ownerId !== sessionId` and age < 5s
+- Server `loot_failed` handler: `not_found`/`already_looted` → remove drop; `owned` → drop stays
 
 ### Reactor Debug
 

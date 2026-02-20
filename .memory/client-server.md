@@ -522,7 +522,16 @@ Manually curated files (`resourcesv2/mob/`, `resourcesv2/sound/`) remain tracked
   Do NOT multiply by 1000 again inside the function.
 - Client drop landing uses `findFootholdAtXNearY` (same as user drops, -4px offset).
 - Reactor respawn fades in (0.5s), destruction fades out (0.33s).
-- 68 server tests (4 reactor tests: hit, destroy+loot, cooldown, range).
+
+### Loot Ownership (Server-Authoritative)
+- `ReactorState.damageBy`: `Map<sessionId, hitCount>` — tracks hits per player.
+- On destroy, `hitReactor()` returns `majorityHitter` (player who dealt most hits).
+- Drop `owner_id` = majority hitter. Server `loot_item` handler rejects non-owners for 5s.
+- **Player-dropped items**: `owner_id = ""` — no loot protection, anyone can pick up.
+- Server sends `loot_failed { reason, owner_id, remaining_ms }` on rejection.
+- Client pre-checks `drop.ownerId` + `drop.createdAt` (local timestamp) to skip pointless requests.
+- `damageBy` cleared on reactor respawn.
+- 69 server tests (5 reactor/loot tests: hit, destroy+loot, cooldown, range, loot ownership).
 
 ---
 
