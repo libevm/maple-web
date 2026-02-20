@@ -24,7 +24,7 @@ Status: ✅ Synced
 - CI: `bun run ci` ✅ (167 tests across 6 suites)
 - `runtime.player.face_id` / `runtime.player.hair_id`: stored character state (not derived from gender)
 - FPS counter includes ping display (color-coded, 10s interval)
-- Latest commit: `0779335` on `origin/main`
+- Latest commit: `7fd106f` on `origin/main`
 
 ## Key Architecture Decisions
 
@@ -65,6 +65,7 @@ Status: ✅ Synced
 - **Per-player look data**: `remoteLookData` Map stores per-player face/hair WZ data; never falls back to local player's data
 - **Look-prefixed image cache keys**: remote player part images keyed as `rp:{face_id}:{hair_id}:{action}:{frame}:{part}` to prevent cache collisions between different genders/faces/hairs
 - **Server sends gender** in `PlayerLook` (`gender: boolean`, false=male, true=female)
+- **Character info modal**: double-click remote player → HUD modal with sprite (offscreen canvas), name, gender, accomplishments (placeholder)
 
 ### Server-authoritative item drops
 - Server stores drops per map: `RoomManager.mapDrops: Map<mapId, Map<drop_id, MapDrop>>`
