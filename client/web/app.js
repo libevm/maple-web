@@ -1169,6 +1169,8 @@ const MOB_STATE_SEND_INTERVAL = 100; // ms between mob state sends (10Hz)
 const remotePlayers = new Map();
 /** sessionId → Map<itemId, wzJson> */
 const remoteEquipData = new Map();
+/** sessionId → { faceData, hairData } for gender-specific WZ */
+const remoteLookData = new Map();
 /** sessionId → per-player placement template cache */
 const remoteTemplateCache = new Map();
 
@@ -1243,6 +1245,7 @@ function connectWebSocket() {
     if (_wsPingInterval) { clearInterval(_wsPingInterval); _wsPingInterval = null; }
     remotePlayers.clear();
     remoteEquipData.clear();
+    remoteLookData.clear();
     remoteTemplateCache.clear();
 
     // Already logged in from another tab/session — block the game
@@ -1312,11 +1315,13 @@ function handleServerMessage(msg) {
     case "map_state":
       remotePlayers.clear();
       remoteEquipData.clear();
+      remoteLookData.clear();
       remoteTemplateCache.clear();
       for (const p of msg.players || []) {
         const rp = createRemotePlayer(p.id, p.name, p.look, p.x, p.y, p.action, p.facing);
         remotePlayers.set(p.id, rp);
         loadRemotePlayerEquipData(rp);
+        loadRemotePlayerLookData(rp);
       }
       // Restore drops already on the map (landed, no animation)
       for (const d of msg.drops || []) {
@@ -1331,12 +1336,14 @@ function handleServerMessage(msg) {
         const rp = createRemotePlayer(msg.id, msg.name, msg.look, msg.x, msg.y, msg.action, msg.facing);
         remotePlayers.set(msg.id, rp);
         loadRemotePlayerEquipData(rp);
+        loadRemotePlayerLookData(rp);
       }
       break;
 
     case "player_leave":
       remotePlayers.delete(msg.id);
       remoteEquipData.delete(msg.id);
+      remoteLookData.delete(msg.id);
       remoteTemplateCache.delete(msg.id);
       break;
 
@@ -1627,6 +1634,30 @@ async function loadRemotePlayerEquipData(rp) {
   remoteTemplateCache.delete(rp.id); // invalidate placement cache
 }
 
+/** Load face and hair WZ data for a remote player (gender-specific). */
+async function loadRemotePlayerLookData(rp) {
+  const look = rp.look || {};
+  const faceId = look.face_id || 20000;
+  const hairId = look.hair_id || 30000;
+
+  // Skip if this player uses the same face/hair as local player
+  if (faceId === runtime.player.face_id && hairId === runtime.player.hair_id) {
+    remoteLookData.delete(rp.id);
+    return;
+  }
+
+  const entry = { faceData: null, hairData: null, faceId, hairId };
+  try {
+    const facePath = `/resources/Character.wz/Face/${String(faceId).padStart(8, "0")}.img.json`;
+    const hairPath = `/resources/Character.wz/Hair/${String(hairId).padStart(8, "0")}.img.json`;
+    const [faceResp, hairResp] = await Promise.all([cachedFetch(facePath), cachedFetch(hairPath)]);
+    if (faceResp.ok) entry.faceData = await faceResp.json();
+    if (hairResp.ok) entry.hairData = await hairResp.json();
+  } catch {}
+  remoteLookData.set(rp.id, entry);
+  remoteTemplateCache.delete(rp.id);
+}
+
 function updateRemotePlayers(dt) {
   const now = performance.now();
   // Render time is "in the past" — we interpolate between snapshots at this time.
@@ -1799,14 +1830,19 @@ function getRemoteCharacterFrameData(rp) {
   const headMeta = getHeadFrameMeta(action, frameIndex);
   if (headMeta) frameParts.push({ name: "head", meta: headMeta });
 
+  // Face/Hair — use per-player data if different from local player
+  const lookData = remoteLookData.get(rp.id);
+  const rpFaceData = lookData?.faceData || runtime.characterFaceData;
+  const rpHairData = lookData?.hairData || runtime.characterHairData;
+
   // Face — skip during climbing
   if (!CLIMBING_STANCES.has(action)) {
-    const faceMeta = getFaceFrameMeta(frameLeaf, faceExpression, faceFrameIndex);
+    const faceMeta = getFaceFrameMeta(frameLeaf, faceExpression, faceFrameIndex, rpFaceData);
     if (faceMeta) frameParts.push({ name: `face:${faceExpression}:${faceFrameIndex}`, meta: faceMeta });
   }
 
   // Hair
-  const hairParts = getHairFrameParts(action, frameIndex);
+  const hairParts = getHairFrameParts(action, frameIndex, rpHairData);
   for (const hp of hairParts) frameParts.push(hp);
 
   // Equipment — use remote player's equip data
@@ -7383,8 +7419,8 @@ function randomBlinkCooldownMs() {
   return 1200 + Math.random() * 2200;
 }
 
-function getFaceExpressionFrames(expression) {
-  const faceData = runtime.characterFaceData;
+function getFaceExpressionFrames(expression, overrideFaceData) {
+  const faceData = overrideFaceData || runtime.characterFaceData;
   if (!faceData) return [];
 
   const expressionNode = childByName(faceData, expression);
@@ -7398,15 +7434,15 @@ function getFaceExpressionFrames(expression) {
   return [expressionNode];
 }
 
-function getFaceFrameMeta(frameLeaf, expression, expressionFrameIndex) {
-  const faceData = runtime.characterFaceData;
+function getFaceFrameMeta(frameLeaf, expression, expressionFrameIndex, overrideFaceData) {
+  const faceData = overrideFaceData || runtime.characterFaceData;
   if (!faceData) return null;
 
   if (safeNumber(frameLeaf.face, 1) === 0) {
     return null;
   }
 
-  const frames = getFaceExpressionFrames(expression);
+  const frames = getFaceExpressionFrames(expression, overrideFaceData);
   if (frames.length === 0) return null;
 
   const frameNode = frames[expressionFrameIndex % frames.length];
@@ -7618,8 +7654,8 @@ function getEquipFrameParts(data, action, frameIndex, prefix) {
  * During climbing (ladder/rope), C++ CharLook::draw uses Hair::Layer::BACK which maps to
  * "backHair" / "backHairBelowCap" — parts from the "backDefault" section.
  */
-function getHairFrameParts(action, frameIndex) {
-  const hairData = runtime.characterHairData;
+function getHairFrameParts(action, frameIndex, overrideHairData) {
+  const hairData = overrideHairData || runtime.characterHairData;
   if (!hairData) return [];
 
   const actionNode = childByName(hairData, action);
@@ -11409,6 +11445,7 @@ async function loadMap(mapId, spawnPortalName = null, spawnFromPortalTransfer = 
   // Clear remote players and mob authority on map change
   remotePlayers.clear();
   remoteEquipData.clear();
+  remoteLookData.clear();
   remoteTemplateCache.clear();
   _isMobAuthority = false;
 
