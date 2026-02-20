@@ -498,6 +498,12 @@ export function createServer(
               return;
             }
 
+            // Reject if this session is already connected
+            if (roomManager.getClient(sessionId)) {
+              ws.close(4006, "Already logged in");
+              return;
+            }
+
             const client: WSClient = {
               id: sessionId,
               name: charData.identity.name,

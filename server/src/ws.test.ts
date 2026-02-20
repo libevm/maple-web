@@ -296,4 +296,31 @@ describe("WebSocket server", () => {
     clientA.close();
     clientB.close();
   });
+
+  test("rejects duplicate session (already logged in)", async () => {
+    await createCharacter("dup-a", "DupA");
+
+    // First connection succeeds
+    const client1 = await openWS(wsUrl);
+    client1.send({ type: "auth", session_id: "dup-a" });
+    await client1.waitForMessage("map_state");
+
+    // Second connection with same session should be rejected
+    const client2 = await openWS(wsUrl);
+    client2.send({ type: "auth", session_id: "dup-a" });
+
+    await new Promise<void>((resolve) => {
+      client2.ws.onclose = (e: CloseEvent) => {
+        expect(e.code).toBe(4006);
+        resolve();
+      };
+    });
+
+    // First connection should still be alive
+    client1.send({ type: "ping" });
+    const pong = await client1.waitForMessage("pong");
+    expect(pong.type).toBe("pong");
+
+    client1.close();
+  });
 });

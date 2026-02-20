@@ -1034,12 +1034,20 @@ function connectWebSocket() {
     } catch {}
   };
 
-  _ws.onclose = () => {
+  _ws.onclose = (event) => {
     _wsConnected = false;
     if (_wsPingInterval) { clearInterval(_wsPingInterval); _wsPingInterval = null; }
     remotePlayers.clear();
     remoteEquipData.clear();
     remoteTemplateCache.clear();
+
+    // Already logged in from another tab/session — don't reconnect
+    if (event.code === 4006) {
+      rlog("WS rejected: already logged in from another session");
+      addSystemChatMessage("⚠ This character is already logged in elsewhere. Close the other session to connect.");
+      return;
+    }
+
     rlog("WS disconnected, reconnecting in 3s…");
     if (_wsReconnectTimer) clearTimeout(_wsReconnectTimer);
     _wsReconnectTimer = setTimeout(connectWebSocket, 3000);
