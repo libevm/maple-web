@@ -323,4 +323,48 @@ describe("WebSocket server", () => {
 
     client1.close();
   });
+
+  test("cannot steal unclaimed name from online player", async () => {
+    const onlineSession = "online-holder-session";
+    const thiefSession = "thief-session";
+
+    // Create a character with an unclaimed name
+    await createCharacter(onlineSession, "OnlineHero");
+
+    // Connect via WebSocket (player is now online)
+    const client = await openWS(wsUrl);
+    client.send({ type: "auth", session_id: onlineSession });
+    await client.waitForMessage("map_state");
+
+    // Another session tries to create a character with the same name
+    const res = await fetch(`${baseUrl}/api/character/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${thiefSession}` },
+      body: JSON.stringify({ name: "OnlineHero", gender: false }),
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("NAME_TAKEN");
+
+    client.close();
+  });
+
+  test("can take unclaimed name from offline player", async () => {
+    const offlineSession = "offline-holder-session";
+    const takerSession = "taker-session";
+
+    // Create a character with an unclaimed name (no WS connection = offline)
+    await createCharacter(offlineSession, "OfflineHero");
+
+    // Another session takes the name — should succeed (unclaimed + offline)
+    const res = await fetch(`${baseUrl}/api/character/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${takerSession}` },
+      body: JSON.stringify({ name: "OfflineHero", gender: true }),
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.identity.name).toBe("OfflineHero");
+  });
 });
