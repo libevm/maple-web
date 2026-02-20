@@ -1385,16 +1385,21 @@ function handleServerMessage(msg) {
         const isHitExpr = msg.expression === "hit" || msg.expression === "pain";
         rp.faceExpressionExpires = performance.now() + (isHitExpr ? PLAYER_HIT_FACE_DURATION_MS : 2500);
         // Pre-warm face image for frame 0 of this expression to avoid decode blink
-        const fFrames = getFaceExpressionFrames(msg.expression);
-        if (fFrames.length > 0) {
-          const bodyFrames = getCharacterActionFrames(rp.action);
-          if (bodyFrames.length > 0) {
-            const bfNode = bodyFrames[rp.frameIndex % bodyFrames.length];
-            const bfLeaf = imgdirLeafRecord(bfNode);
-            const faceMeta = getFaceFrameMeta(bfLeaf, msg.expression, 0);
-            if (faceMeta) {
-              const key = `char:${rp.action}:${rp.frameIndex}:face:${msg.expression}:0`;
-              requestCharacterPartImage(key, faceMeta);
+        const rpLook = rp.look || {};
+        const rpLookData = remoteLookData.get(rp.id);
+        const rpFace = rpLookData?.faceData ?? null;
+        if (rpFace) {
+          const fFrames = getFaceExpressionFrames(msg.expression, rpFace);
+          if (fFrames.length > 0) {
+            const bodyFrames = getCharacterActionFrames(rp.action);
+            if (bodyFrames.length > 0) {
+              const bfNode = bodyFrames[rp.frameIndex % bodyFrames.length];
+              const bfLeaf = imgdirLeafRecord(bfNode);
+              const faceMeta = getFaceFrameMeta(bfLeaf, msg.expression, 0, rpFace);
+              if (faceMeta) {
+                const key = `rp:${rpLook.face_id || 0}:${rpLook.hair_id || 0}:${rp.action}:${rp.frameIndex}:face:${msg.expression}:0`;
+                requestCharacterPartImage(key, faceMeta);
+              }
             }
           }
         }
@@ -1881,9 +1886,14 @@ function getRemotePlayerPlacementTemplate(rp, action, frameIndex, flipped, faceE
   const frame = getRemoteCharacterFrameData(rp);
   if (!frame || !frame.parts?.length) return null;
 
+  // Use per-player look IDs in cache key to avoid collisions between
+  // players with different face/hair/equips sharing the same image slot
+  const look = rp.look || {};
+  const lookPrefix = `rp:${look.face_id || 0}:${look.hair_id || 0}`;
+
   const partAssets = frame.parts
     .map((part) => {
-      const key = `char:${action}:${frameIndex}:${part.name}`;
+      const key = `${lookPrefix}:${action}:${frameIndex}:${part.name}`;
       requestCharacterPartImage(key, part.meta);
       const image = getImageByKey(key);
       return { ...part, key, image };
