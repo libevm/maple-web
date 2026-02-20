@@ -22,6 +22,8 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #map-canvas {
@@ -99,6 +101,9 @@ body:has(.canvas-wrapper.fixed-res) {
   color: rgba(255, 255, 255, 0.85);
   font: 400 12px -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: none;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -893,6 +898,8 @@ button {
   text-align: center;
   line-height: 1.1;
   pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .item-slot .slot-qty {
@@ -977,6 +984,9 @@ button {
   pointer-events: none;
   min-width: 80px;
   max-width: 180px;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: none;
 }
 
 .ui-tooltip.hidden {
