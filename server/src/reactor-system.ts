@@ -23,127 +23,97 @@ const REACTOR_RESPAWN_MS = 10_000;
 const REACTOR_HIT_RANGE_X = 120;
 const REACTOR_HIT_RANGE_Y = 60;
 
-// ─── Drop Tables ────────────────────────────────────────────────────
+// ─── Drop Tables (loaded from WZ at startup) ───────────────────────
 
 /**
  * Drop rate tiers:
- *   equipment  15%
- *   etc        49%
+ *   equipment  19%
+ *   etc        50%
  *   use items  25%
- *   chairs     10%
- *   cash items  1%
+ *   chairs      5%
+ *   cash items   2%
+ *
+ * Pools are loaded dynamically from resourcesv2/ WZ data.
  */
 
-/** Equipment drops (beginner-appropriate gear) */
-const EQUIP_DROPS: number[] = [
-  // Caps
-  1002001,  // Old Wisconsin
-  1002003,  // Brown Hunting Cap
-  1002017,  // Metal Gear
-  1002050,  // White Bandana
-  // Coats
-  1040002,  // White Undershirt
-  1040006,  // Blue One-lined T-Shirt
-  1041002,  // Yellow T-Shirt (F)
-  1041006,  // Green-Striped Top (F)
-  // Pants
-  1060002,  // Blue Jean Shorts
-  1060006,  // Brown Cotton Shorts
-  1061002,  // Red Miniskirt (F)
-  1061006,  // Brown Miniskirt (F)
-  // Shoes
-  1072001,  // Red Rubber Boots
-  1072004,  // Leather Sandals
-  1072002,  // Yellow Rubber Boots
-  // Weapons
-  1302000,  // Sword
-  1302004,  // Wooden Sword
-  1322005,  // Wooden Mallet
-  1402001,  // Wooden Sword (2H)
-  1442000,  // Wooden Pole Arm
-];
+let EQUIP_DROPS: number[] = [];
+let USE_DROPS: number[] = [];
+let ETC_DROPS: number[] = [];
+let CHAIR_DROPS: number[] = [];
+let CASH_DROPS: number[] = [];
+let _dropPoolsLoaded = false;
 
-/** USE items (potions, scrolls) */
-const USE_DROPS: number[] = [
-  2000013,  // Red Potion for Beginners
-  2000014,  // Blue Potion for Beginners
-  2000000,  // Red Potion
-  2000001,  // Orange Potion
-  2000002,  // White Potion
-  2000003,  // Blue Potion
-  2000006,  // Mana Elixir
-  2000004,  // Elixir
-  2010000,  // Apple
-  2010009,  // Meat
-  2020013,  // Unagi
-  2020015,  // Fried Chicken
-];
+/** Extract 8-digit item IDs from an Item.wz JSON file (each has $imgdir children keyed by ID) */
+function extractItemIds(json: any): number[] {
+  const ids: number[] = [];
+  for (const child of json?.$$  ?? []) {
+    const key = child.$imgdir;
+    if (key && /^\d{7,8}$/.test(key)) {
+      ids.push(parseInt(key, 10));
+    }
+  }
+  return ids;
+}
 
-/** ETC items (collectibles, quest items) */
-const ETC_DROPS: number[] = [
-  4000000,  // Blue Snail Shell
-  4000001,  // Red Snail Shell
-  4000002,  // Snail Shell
-  4000003,  // Orange Mushroom Cap
-  4000004,  // Octopus Leg
-  4000005,  // Pig Ribbon
-  4000006,  // Jr. Necki Skin
-  4000007,  // Blue Mushroom Cap
-  4000008,  // Horny Mushroom Cap
-  4000009,  // Green Mushroom Cap
-  4000010,  // Stirge Wing
-  4000011,  // Stump Piece
-  4000012,  // Slime Bubble
-  4000013,  // Wild Boar Tooth
-  4000014,  // Land of Wild Boar
-  4000016,  // Charm of Undead
-  4000018,  // Pig's Head
-  4000019,  // Drake Skull
-  4000020,  // Blue Drake Skull
-  4000021,  // Fire Boar's Nose
-  4010000,  // Bronze Ore
-  4010001,  // Steel Ore
-  4010002,  // Mithril Ore
-  4010003,  // Adamantium Ore
-  4010004,  // Silver Ore
-  4010005,  // Orihalcon Ore
-  4010006,  // Gold Ore
-  4020000,  // Garnet Ore
-  4020001,  // Amethyst Ore
-  4020002,  // Aquamarine Ore
-  4020003,  // Emerald Ore
-  4020004,  // Opal Ore
-  4020005,  // Sapphire Ore
-  4020006,  // Topaz Ore
-  4020007,  // Diamond Ore
-  4020008,  // Black Crystal Ore
-];
+/** Load drop pools from resourcesv2/ WZ data. Call once at server startup. */
+export function loadDropPools(resourceBase: string): void {
+  if (_dropPoolsLoaded) return;
+  _dropPoolsLoaded = true;
 
-/** Chair items */
-const CHAIR_DROPS: number[] = [
-  3010000,  // The Relaxer
-  3010001,  // Sky-blue Wooden Chair
-  3010002,  // Green Chair
-  3010003,  // Red Chair
-  3010004,  // The Yellow Relaxer
-  3010005,  // The Red Relaxer
-  3010006,  // Yellow Chair
-  3010007,  // Pink Seal Cushion
-  3010008,  // Blue Seal Cushion
-  3010009,  // Red Round Chair
-];
+  const fs = require("fs");
+  const path = require("path");
 
-/** Cash items (rare cosmetic effects) */
-const CASH_DROPS: number[] = [
-  5010000,  // Sunny Day
-  5010001,  // Moon & the Stars
-  5010002,  // Colorful Rainbow
-  5010003,  // Little Devil
-  5010004,  // Underwater
-  5010005,  // Looking for Love
-  5010006,  // Baby Angel
-  5010007,  // Fugitive
-];
+  // ── Equipment: Character.wz/<Type>/ — each file is one equip item ──
+  const equipDirs = ["Cap", "Coat", "Longcoat", "Pants", "Shoes", "Glove", "Shield", "Cape", "Weapon"];
+  for (const dir of equipDirs) {
+    const fullDir = path.join(resourceBase, "Character.wz", dir);
+    try {
+      const files = fs.readdirSync(fullDir).filter((f: string) => f.endsWith(".img.json"));
+      for (const f of files) {
+        const id = parseInt(f.replace(".img.json", ""), 10);
+        if (!isNaN(id)) EQUIP_DROPS.push(id);
+      }
+    } catch {}
+  }
+
+  // ── USE items: Item.wz/Consume/ ──
+  const consumeDir = path.join(resourceBase, "Item.wz", "Consume");
+  try {
+    for (const f of fs.readdirSync(consumeDir).filter((f: string) => f.endsWith(".img.json"))) {
+      const json = JSON.parse(fs.readFileSync(path.join(consumeDir, f), "utf8"));
+      USE_DROPS.push(...extractItemIds(json));
+    }
+  } catch {}
+
+  // ── ETC items: Item.wz/Etc/ ──
+  const etcDir = path.join(resourceBase, "Item.wz", "Etc");
+  try {
+    for (const f of fs.readdirSync(etcDir).filter((f: string) => f.endsWith(".img.json"))) {
+      const json = JSON.parse(fs.readFileSync(path.join(etcDir, f), "utf8"));
+      ETC_DROPS.push(...extractItemIds(json));
+    }
+  } catch {}
+
+  // ── Chairs: Item.wz/Install/ ──
+  const installDir = path.join(resourceBase, "Item.wz", "Install");
+  try {
+    for (const f of fs.readdirSync(installDir).filter((f: string) => f.endsWith(".img.json"))) {
+      const json = JSON.parse(fs.readFileSync(path.join(installDir, f), "utf8"));
+      CHAIR_DROPS.push(...extractItemIds(json));
+    }
+  } catch {}
+
+  // ── Cash items: Item.wz/Cash/ ──
+  const cashDir = path.join(resourceBase, "Item.wz", "Cash");
+  try {
+    for (const f of fs.readdirSync(cashDir).filter((f: string) => f.endsWith(".img.json"))) {
+      const json = JSON.parse(fs.readFileSync(path.join(cashDir, f), "utf8"));
+      CASH_DROPS.push(...extractItemIds(json));
+    }
+  } catch {}
+
+  console.log(`[reactor] Drop pools loaded: equip=${EQUIP_DROPS.length} use=${USE_DROPS.length} etc=${ETC_DROPS.length} chairs=${CHAIR_DROPS.length} cash=${CASH_DROPS.length}`);
+}
 
 // ─── Reactor Definitions ────────────────────────────────────────────
 
@@ -330,28 +300,35 @@ export function rollReactorLoot(): LootItem {
   let category: string;
   let qty = 1;
 
-  if (roll < 1) {
-    // 1% — cash
+  if (roll < 2) {
+    // 2% — cash items
     pool = CASH_DROPS;
     category = "CASH";
-  } else if (roll < 11) {
-    // 10% — chairs
+  } else if (roll < 7) {
+    // 5% — chairs
     pool = CHAIR_DROPS;
     category = "SETUP";
   } else if (roll < 26) {
-    // 15% — equipment
+    // 19% — equipment
     pool = EQUIP_DROPS;
     category = "EQUIP";
   } else if (roll < 51) {
     // 25% — use items
     pool = USE_DROPS;
     category = "USE";
-    qty = 1 + Math.floor(Math.random() * 5); // 1-5 potions
+    qty = 1 + Math.floor(Math.random() * 5); // 1-5
   } else {
-    // 49% — etc
+    // 50% — etc items
     pool = ETC_DROPS;
     category = "ETC";
-    qty = 1 + Math.floor(Math.random() * 10); // 1-10 materials
+    qty = 1 + Math.floor(Math.random() * 10); // 1-10
+  }
+
+  // Fallback if pool is empty (WZ data not loaded)
+  if (!pool || pool.length === 0) {
+    pool = ETC_DROPS.length > 0 ? ETC_DROPS : [4000000];
+    category = "ETC";
+    qty = 1;
   }
 
   const item_id = pool[Math.floor(Math.random() * pool.length)];

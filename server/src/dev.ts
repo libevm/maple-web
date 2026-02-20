@@ -1,5 +1,11 @@
 import { createServer } from "./server.ts";
 import { InMemoryDataProvider } from "./data-provider.ts";
+import { loadDropPools } from "./reactor-system.ts";
+import * as path from "path";
+
+// Load drop pools from WZ data at startup
+const resourceBase = path.resolve(__dirname, "../../resourcesv2");
+loadDropPools(resourceBase);
 
 const provider = new InMemoryDataProvider();
 const { start } = createServer(provider, {

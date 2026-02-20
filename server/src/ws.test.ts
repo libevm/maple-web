@@ -3,6 +3,11 @@ import { createServer } from "./server.ts";
 import { InMemoryDataProvider } from "./data-provider.ts";
 import { createDefaultCharacter, initDatabase } from "./db.ts";
 import { setDebugMode } from "./ws.ts";
+import { loadDropPools } from "./reactor-system.ts";
+import * as path from "path";
+
+// Load drop pools from WZ data for tests
+loadDropPools(path.resolve(__dirname, "../../resourcesv2"));
 
 /**
  * Helper: open a WebSocket and return a promise-based interface.
