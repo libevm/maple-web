@@ -1971,7 +1971,7 @@ function findRemotePlayerAtScreen(screenX, screenY) {
  * all image parts are decoded and rendered.
  */
 async function renderRemotePlayerSprite(rp, canvasEl) {
-  const SIZE = 120;
+  const SIZE = canvasEl.width || 80;
   canvasEl.width = SIZE;
   canvasEl.height = SIZE;
 
@@ -2038,20 +2038,18 @@ function showPlayerInfoModal(rp) {
   overlay.innerHTML = `
     <div class="modal-panel" id="player-info-panel"
       style="width:240px;position:absolute;pointer-events:auto;">
-      <div class="modal-titlebar" id="player-info-titlebar" style="cursor:none;">
+      <div class="modal-titlebar" id="player-info-titlebar" style="cursor:none;position:relative;">
         <span class="modal-title">${name}</span>
+        <button class="game-window-close" id="player-info-close" style="position:absolute;right:3px;top:3px;">&times;</button>
       </div>
-      <div class="modal-body" style="padding:14px 16px 10px;text-align:center;">
-        <canvas id="player-info-sprite" width="120" height="120"
+      <div class="modal-body" style="padding:14px 16px 12px;text-align:center;">
+        <canvas id="player-info-sprite" width="80" height="80"
           style="display:block;margin:0 auto 10px;image-rendering:pixelated;"></canvas>
         <div style="font-size:11px;color:#8a9bb5;margin-bottom:10px;">${gender}</div>
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:8px;">
           <div style="font-size:11px;color:#8a9bb5;margin-bottom:4px;">Accomplishments</div>
           <div style="font-size:11px;color:#5a6a7a;font-style:italic;">None yet</div>
         </div>
-      </div>
-      <div class="modal-buttons" style="margin-bottom:8px;">
-        <button class="modal-btn modal-btn-cancel" id="player-info-close">Close</button>
       </div>
     </div>
   `;
