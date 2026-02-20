@@ -31,7 +31,7 @@ tick(timestampMs)                ← requestAnimationFrame
 2. If loading.active → drawLoadingScreen() → return
 3. If !runtime.map  → drawTransitionOverlay() → return
 4. drawBackgroundLayer(0)       ← back backgrounds (front=0)
-5. drawMapLayersWithCharacter() ← per layer: drawMapLayer + drawLifeSprites(layer) + drawAllRemotePlayerSprites + drawCharacter at playerLayer (local player always on top)
+5. drawMapLayersWithCharacter() ← per layer: drawMapLayer + drawLifeSprites(layer) + remote players at their foothold layer + drawCharacter at playerLayer (local player on top of same-layer remotes)
 6. drawReactors()               ← reactor sprites (state 0 idle)
 7. drawDamageNumbers()          ← floating damage text from combat
 8. drawRopeGuides()             ← debug overlay (if enabled)

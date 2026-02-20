@@ -2448,7 +2448,7 @@ function showDropQuantityModal(maxQty) {
           <span style="color:#777;font-size:11px;">/ ${maxQty}</span>
         </div>
       </div>
-      <div class="modal-buttons">
+      <div class="modal-buttons" style="margin-bottom:8px;">
         <button class="modal-btn modal-btn-ok" id="drop-qty-ok">OK</button>
         <button class="modal-btn modal-btn-cancel" id="drop-qty-cancel">Cancel</button>
       </div>
