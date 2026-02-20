@@ -342,6 +342,10 @@ export class RoomManager {
     return fullDrop;
   }
 
+  getDrop(mapId: string, dropId: number): MapDrop | null {
+    return this.mapDrops.get(mapId)?.get(dropId) ?? null;
+  }
+
   removeDrop(mapId: string, dropId: number): MapDrop | null {
     const drops = this.mapDrops.get(mapId);
     if (!drops) return null;
@@ -909,8 +913,19 @@ export function handleClientMessage(
 
     case "loot_item": {
       const dropId = msg.drop_id as number;
+      // Check loot ownership before removing
+      const pendingDrop = roomManager.getDrop(client.mapId, dropId);
+      if (!pendingDrop) break; // drop doesn't exist
+
+      // Loot ownership: if someone else owns this drop, they must wait 5s
+      const LOOT_PROTECTION_MS = 5_000;
+      if (pendingDrop.owner_id && pendingDrop.owner_id !== client.id) {
+        const age = Date.now() - pendingDrop.created_at;
+        if (age < LOOT_PROTECTION_MS) break; // not your drop yet — silently reject
+      }
+
       const looted = roomManager.removeDrop(client.mapId, dropId);
-      if (!looted) break; // drop doesn't exist (already looted)
+      if (!looted) break; // race condition — already looted
       // Broadcast to ALL in room including the looter
       roomManager.broadcastToRoom(client.mapId, {
         type: "drop_loot",
@@ -930,7 +945,7 @@ export function handleClientMessage(
       const reactorIdx = Number(msg.reactor_idx);
       if (!client.mapId) break;
 
-      const result = hitReactor(client.mapId, reactorIdx, client.x, client.y);
+      const result = hitReactor(client.mapId, reactorIdx, client.x, client.y, client.id);
       if (!result.ok) break; // silently reject invalid hits
 
       if (result.destroyed) {
@@ -954,7 +969,7 @@ export function handleClientMessage(
           x: dropX,
           startY: dropY - 40, // arc starts above reactor
           destY: dropY,       // client recalculates using foothold detection
-          owner_id: "",       // no owner — anyone can loot
+          owner_id: result.majorityHitter || client.id, // majority damage dealer gets priority
           iconKey: "",        // client loads icon from WZ
           category: loot.category,
         });

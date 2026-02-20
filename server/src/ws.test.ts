@@ -705,4 +705,51 @@ describe("WebSocket server", () => {
 
     client.close();
   });
+
+  test("loot_item: non-owner cannot loot within 5s", async () => {
+    // Player A destroys a reactor, getting owner rights on the drop
+    await createCharacter("loot-owner", "LootOwner");
+    await createCharacter("loot-thief", "LootThief");
+
+    const clientA = await openWS(wsUrl);
+    const clientB = await openWS(wsUrl);
+    await authAndJoin(clientA, "loot-owner");
+    await authAndJoin(clientB, "loot-thief");
+
+    // A moves to reactor 4 (x=1000, y=274) and destroys it
+    clientA.send({ type: "move", x: 1000, y: 274, action: "stand1", facing: 1 });
+    await new Promise(r => setTimeout(r, 50));
+
+    for (let i = 0; i < 3; i++) {
+      clientA.send({ type: "hit_reactor", reactor_idx: 3 });
+      await clientA.waitForMessage("reactor_hit");
+      await new Promise(r => setTimeout(r, 650));
+    }
+    clientA.send({ type: "hit_reactor", reactor_idx: 3 });
+    await clientA.waitForMessage("reactor_destroy");
+
+    // Get the drop_spawn
+    const dropMsg = await clientA.waitForMessage("drop_spawn");
+    const dropId = dropMsg.drop.drop_id;
+    expect(dropMsg.drop.owner_id).toBe("loot-owner");
+
+    // B tries to loot immediately — should be rejected (not owner, < 5s)
+    clientB.send({ type: "move", x: 1000, y: 274, action: "stand1", facing: 1 });
+    await new Promise(r => setTimeout(r, 50));
+    clientB.send({ type: "loot_item", drop_id: dropId });
+    let gotLoot = false;
+    try {
+      await clientB.waitForMessage("drop_loot", 300);
+      gotLoot = true;
+    } catch { /* timeout = expected */ }
+    expect(gotLoot).toBe(false);
+
+    // A can loot immediately
+    clientA.send({ type: "loot_item", drop_id: dropId });
+    const lootMsg = await clientA.waitForMessage("drop_loot");
+    expect(lootMsg.looter_id).toBe("loot-owner");
+
+    clientA.close();
+    clientB.close();
+  });
 });

@@ -148,6 +148,7 @@ export interface ReactorState {
   active: boolean;      // false = destroyed, waiting for respawn
   lastHitMs: number;    // timestamp of last hit (for cooldown)
   respawnAt: number;    // timestamp when reactor should respawn (0 = not pending)
+  damageBy: Map<string, number>; // sessionId → hit count (for loot ownership)
 }
 
 /**
@@ -174,6 +175,7 @@ export function getMapReactors(mapId: string): ReactorState[] {
     active: true,
     lastHitMs: 0,
     respawnAt: 0,
+    damageBy: new Map<string, number>(),
   }));
 
   _mapReactors.set(mapId, states);
@@ -215,11 +217,13 @@ export function hitReactor(
   reactorIdx: number,
   playerX: number,
   playerY: number,
+  playerId: string,
 ): {
   ok: boolean;
   destroyed?: boolean;
   newState?: number;
   newHp?: number;
+  majorityHitter?: string; // session ID of player who dealt most hits (on destroy)
   reason?: string;
 } {
   const states = getMapReactors(mapId);
@@ -250,11 +254,19 @@ export function hitReactor(
   reactor.hp -= 1;
   reactor.state += 1;
 
+  // Track damage per player
+  reactor.damageBy.set(playerId, (reactor.damageBy.get(playerId) ?? 0) + 1);
+
   if (reactor.hp <= 0) {
-    // Destroyed
+    // Destroyed — find majority hitter
+    let majorityHitter = playerId;
+    let maxHits = 0;
+    for (const [sid, hits] of reactor.damageBy) {
+      if (hits > maxHits) { maxHits = hits; majorityHitter = sid; }
+    }
     reactor.active = false;
     reactor.respawnAt = now + REACTOR_RESPAWN_MS;
-    return { ok: true, destroyed: true, newState: reactor.state, newHp: 0 };
+    return { ok: true, destroyed: true, newState: reactor.state, newHp: 0, majorityHitter };
   }
 
   return { ok: true, destroyed: false, newState: reactor.state, newHp: reactor.hp };
@@ -277,6 +289,7 @@ export function tickReactorRespawns(): Array<{ mapId: string; reactor: ReactorSt
         reactor.active = true;
         reactor.lastHitMs = 0;
         reactor.respawnAt = 0;
+        reactor.damageBy.clear();
         respawned.push({ mapId, reactor });
       }
     }
