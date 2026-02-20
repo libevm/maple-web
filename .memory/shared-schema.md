@@ -435,12 +435,12 @@ Possible reasons:
 
 ### `reactor_respawn` — Reactor respawned after 30s (server → room)
 ```json
-{ "type": "reactor_respawn", "reactor_idx": 0, "reactor_id": "0002000", "x": -200, "y": 274 }
+{ "type": "reactor_respawn", "reactor_idx": 0, "reactor_id": "0002001", "x": -400, "y": 252 }
 ```
 
 ### `map_state` — now includes `reactors` array
 ```json
-{ "type": "map_state", ..., "reactors": [{ "idx": 0, "reactor_id": "0002000", "x": -200, "y": 274, "state": 0, "hp": 4, "active": true }] }
+{ "type": "map_state", ..., "reactors": [{ "idx": 0, "reactor_id": "0002001", "x": -400, "y": 252, "state": 0, "hp": 4, "active": true }] }
 ```
 
 ### `player_prone` — Player prone state

@@ -501,20 +501,25 @@ Manually curated files (`resourcesv2/mob/`, `resourcesv2/sound/`) remain tracked
 ## Server-Authoritative Reactor System
 
 - **`server/src/reactor-system.ts`** — standalone module for reactor state, hit validation, respawn, loot.
-- Map 100000001 has 5 destroyable boxes (reactor 0002000, Maple Island wooden box).
-- 4 on grass ground (y=274) at x=-200, 200, 600, 1000; 1 on platform (x=60, y=38) near Maya NPC.
+- Map 100000001 has 5 destroyable boxes (**reactor 0002001**, 64×45 wooden box).
+- 4 on grass ground at x=-400, 200, 600, 1000 (y=252, foothold 274); 1 on platform (x=60, y=16, foothold 38).
+- Reactor y = footholdY - (spriteHeight - originY) so sprite bottom sits on foothold.
 - **4 hits to destroy** (REACTOR_MAX_HP=4). Each hit advances WZ state.
 - **600ms global cooldown** between hits on the same reactor (shared across all players).
-- **30s respawn** after destruction (REACTOR_RESPAWN_MS=30000).
+- **10s respawn** after destruction (REACTOR_RESPAWN_MS=10000).
 - **Server-computed loot drops** via `rollReactorLoot()`:
   - 49% ETC items, 25% USE items, 15% equipment, 10% chairs, 1% cash items
   - Random item selected from pool per category
 - Server broadcasts `reactor_hit`/`reactor_destroy`/`reactor_respawn` to all room clients.
 - `map_state` includes `reactors[]` array for late-joining clients.
 - Client `performAttack()` finds reactors in range via `findReactorsInRange()`, sends `hit_reactor`.
-- Client renders multi-state idle + hit animations from `Reactor.wz` JSON (all states loaded).
+- **Hit animations**: `reactor_hit` → state 0 shake (2 frames, 400ms); `reactor_destroy` → state 3 break (7 frames, 1400ms).
+- **Sounds**: `ReactorHit` (shake) and `ReactorBreak` (destroy) from `Sound.wz/Reactor.img.json > 2000`.
+- **CRITICAL**: `updateReactorAnimations(dt)` receives `dt` in **milliseconds** (caller passes `dt * 1000`).
+  Do NOT multiply by 1000 again inside the function.
+- Client drop landing uses `findFootholdAtXNearY` (same as user drops, -4px offset).
 - Reactor respawn fades in (0.5s), destruction fades out (0.33s).
-- 68 server tests (4 new reactor tests: hit, destroy+loot, cooldown, range).
+- 68 server tests (4 reactor tests: hit, destroy+loot, cooldown, range).
 
 ---
 

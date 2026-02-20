@@ -332,16 +332,22 @@ Life sprite frames extract basedata into separate objects, so deleting `frame.ba
 
 ## Reactors (Server-Authoritative Destroyable Objects)
 
+**Reactor 0002001** (64×45 wooden box) on map 100000001: 5 placements.
+
 `drawReactors()`:
 - Iterates `reactorRuntimeState` entries
 - Position from `reactor.x` / `reactor.y` — y is set so sprite bottom sits on foothold
-  (y = footholdY - (spriteHeight - originY), e.g. 274 - 17 = 257 for the wooden box)
+  (y = footholdY - (spriteHeight - originY), e.g. 274 - 22 = 252 for reactor 0002001)
 - Standard WZ origin-based rendering: `drawImage(img, screenX - originX, screenY - originY)`
 - Screen coords: `worldX/Y - cam.x/y + halfW/H`
 - Off-screen culling with 100px margin
-- Renders current WZ state's idle frame OR hit animation frame (exact state, no fallback)
+- Renders current WZ state's idle frame OR hit animation frame
 - Supports opacity for fade-in (respawn, 0.5s) and fade-out (destroy, 0.33s)
-- Hit animation plays for the **pre-hit state** (`hitAnimState`), matching C++ `set_state()`
+
+**Hit animation logic:**
+- `reactor_hit` → `hitAnimState = 0` (always plays state 0 "shake" — 2 frames)
+- `reactor_destroy` → `hitAnimState = rState.state` (plays state 3 "break apart" — 7 frames)
+- States 1/2 have no hit/idle frames; not used for animation lookup
 
 ### Reactor Loading
 
@@ -349,7 +355,7 @@ Life sprite frames extract basedata into separate objects, so deleting `frame.ba
 - Loads ALL states: idle canvas frames + `hit` sub-animation per state
 - Returns `{ states: { [stateNum]: { idle: [frames], hit: [frames] } }, name }`
 - Cached in `reactorAnimations` Map keyed `reactorId`
-- Hit frame delay minimum: 350ms (WZ default 150ms is too fast visually)
+- Hit frame delay minimum: 200ms (WZ default 150ms). Shake: 400ms, Break: 1400ms.
 - Preload in `buildMapAssetPreloadTasks` for WZ-defined reactors
 - `syncServerReactors` also registers frames in `metaCache` + calls `requestImageByKey`
 
@@ -358,10 +364,11 @@ Life sprite frames extract basedata into separate objects, so deleting `frame.ba
 - `reactorRuntimeState` Map keyed by reactor entry index
 - Server-synced via `syncServerReactors()` from `map_state` message
 - Tracks: `frameIndex`, `elapsed`, `state`, `hp`, `active`, `destroyed`, `opacity`
-- Hit animation: `hitAnimPlaying`, `hitAnimState` (pre-hit state), `hitAnimFrameIndex`, `hitAnimElapsed`
-- States with no hit anim (e.g. states 1/2) → `hitAnimPlaying = false` immediately (no fallback)
+- Hit animation: `hitAnimPlaying`, `hitAnimState`, `hitAnimFrameIndex`, `hitAnimElapsed`
 - `initReactorRuntimeStates()` — offline fallback, skipped if server already synced
-- `updateReactorAnimations(dt)` — advances idle + hit anims, fade-in/fade-out
+- **`updateReactorAnimations(dt)`** — `dt` is in **milliseconds** (caller passes `dt * 1000`)
+  - Uses `dt` directly for elapsed accumulation (NOT `dt * 1000` again)
+  - Fade opacity: `dt * 0.002` for fade-in, `dt * 0.003` for fade-out
 - Cleared at start of `loadMap()` to avoid stale data
 
 ### Reactor Hit Detection
@@ -375,6 +382,12 @@ Life sprite frames extract basedata into separate objects, so deleting `frame.ba
 - `ReactorHit` — state 0 hit sound from `Sound.wz/Reactor.img.json > 2000 > 0 > Hit`
 - `ReactorBreak` — state 3 hit sound (destruction) from same file `> 3 > Hit`
 - Preloaded in `preloadUISounds()`
+
+### Reactor Drop Landing
+
+- `createDropFromServer` uses `findFootholdAtXNearY`/`findFootholdBelow` for destY
+- Same foothold detection as user-dropped items (with -4px offset)
+- Server destY is only a hint; client recalculates locally
 
 ### Reactor Debug
 
