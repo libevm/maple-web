@@ -1465,10 +1465,19 @@ function updateRemotePlayers(dt) {
 }
 
 function getRemoteFrameDelay(rp) {
+  // Read actual WZ frame delay from body data (same source as local player)
+  const frames = getCharacterActionFrames(rp.action);
+  if (frames.length > 0) {
+    const frameNode = frames[rp.frameIndex % frames.length];
+    const leafRec = imgdirLeafRecord(frameNode);
+    const wzDelay = safeNumber(leafRec.delay, 0);
+    if (wzDelay > 0) return wzDelay;
+  }
+  // Fallbacks when WZ data not available
   if (rp.action === "walk1") return 150;
-  if (rp.attacking) return 120;
+  if (rp.attacking) return 200;
   if (rp.action === "ladder" || rp.action === "rope") return 200;
-  return 200; // stand, sit, prone, etc.
+  return 200;
 }
 
 function getRemoteFrameCount(rp) {
@@ -2166,6 +2175,7 @@ function dropItemOnMap() {
     name: dropName,
     qty: dropQty,
     x: dropX,
+    startY: startY,
     destY: destY,
     iconKey: dropIconKey,
     category: dropCategory,
@@ -2379,7 +2389,7 @@ function createDropFromServer(dropData, animate) {
     iconKey: dropData.iconKey || "",
     category: dropData.category || null,
     x: dropData.x,
-    y: animate ? (dropData.destY - 80) : dropData.destY, // if animate, start above and arc down
+    y: animate ? (dropData.startY || dropData.destY) : dropData.destY,
     destY: dropData.destY,
     vy: animate ? DROP_SPAWN_VSPEED : 0,
     onGround: !animate,

@@ -40,8 +40,9 @@ export interface MapDrop {
   name: string;
   qty: number;
   x: number;
-  destY: number;
-  owner_id: string;  // session ID of who dropped it
+  startY: number;     // Y where the drop animation begins (dropper's position)
+  destY: number;      // Y where the drop lands (foothold)
+  owner_id: string;   // session ID of who dropped it
   iconKey: string;    // client icon cache key for rendering
   category: string | null;
 }
@@ -386,6 +387,7 @@ export function handleClientMessage(
         name: (msg.name as string) || "",
         qty: (msg.qty as number) || 1,
         x: msg.x as number,
+        startY: (msg.startY as number) || (msg.destY as number),
         destY: msg.destY as number,
         owner_id: client.id,
         iconKey: (msg.iconKey as string) || "",
