@@ -2380,6 +2380,7 @@ function equipItemFromInventory(invIndex) {
 
 function dropItemOnMap() {
   if (!draggedItem.active) return;
+  if (_dropQtyModalOpen) return; // modal already open
   const iconUri = getIconDataUri(draggedItem.iconKey);
   if (!iconUri) { cancelItemDrag(); return; }
 
@@ -2401,6 +2402,10 @@ let _dropQtyModalOpen = false;
 /** Show modal asking how many items to drop (for stackable items with qty > 1) */
 function showDropQuantityModal(maxQty) {
   _dropQtyModalOpen = true;
+  // Reset cursor click state — the pointerdown that triggered the modal
+  // won't get a matching pointerup on the canvas, so clear it here
+  wzCursor.clickState = false;
+  setCursorState(CURSOR_IDLE);
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.style.cssText = "cursor:none;z-index:200000;";
