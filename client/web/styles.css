@@ -528,8 +528,8 @@ button {
 }
 
 .chat-msg .chat-msg-name {
-  font-weight: 600;
-  color: #7dd3fc;
+  font-weight: normal;
+  color: inherit;
 }
 
 .chat-msg-system {
