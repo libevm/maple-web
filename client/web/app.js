@@ -1943,6 +1943,112 @@ function getRemotePlayerPlacementTemplate(rp, action, frameIndex, flipped, faceE
     }));
 }
 
+/**
+ * Find a remote player at the given screen coordinates.
+ * Uses a bounding box around the character's feet (anchor) position.
+ */
+function findRemotePlayerAtScreen(screenX, screenY) {
+  const cam = runtime.camera;
+  const halfW = gameViewWidth() / 2;
+  const halfH = gameViewHeight() / 2;
+  const HIT_W = 50, HIT_H = 75;
+
+  for (const [id, rp] of remotePlayers) {
+    const sx = Math.round(rp.renderX - cam.x + halfW);
+    const sy = Math.round(rp.renderY - cam.y + halfH);
+    // Character sprite extends above and around the feet position
+    if (screenX >= sx - HIT_W / 2 && screenX <= sx + HIT_W / 2 &&
+        screenY >= sy - HIT_H && screenY <= sy + 10) {
+      return rp;
+    }
+  }
+  return null;
+}
+
+/**
+ * Show a HUD-styled modal with a remote player's character info.
+ */
+function showPlayerInfoModal(rp) {
+  // Don't stack modals
+  if (document.querySelector("#player-info-modal")) return;
+
+  // Render character sprite to an offscreen canvas
+  const spriteCanvas = document.createElement("canvas");
+  spriteCanvas.width = 96;
+  spriteCanvas.height = 96;
+  const sCtx = spriteCanvas.getContext("2d");
+
+  const template = getRemotePlayerPlacementTemplate(rp, "stand1", 0, false, "default", 0);
+  if (template && template.length > 0) {
+    // Find bounding box of all parts
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const part of template) {
+      const px = part.offsetX;
+      const py = part.offsetY;
+      minX = Math.min(minX, px);
+      minY = Math.min(minY, py);
+      maxX = Math.max(maxX, px + part.image.width);
+      maxY = Math.max(maxY, py + part.image.height);
+    }
+    const spriteW = maxX - minX;
+    const spriteH = maxY - minY;
+    const scale = Math.min(96 / spriteW, 96 / spriteH, 2);
+    const offX = (96 - spriteW * scale) / 2 - minX * scale;
+    const offY = (96 - spriteH * scale) / 2 - minY * scale;
+
+    sCtx.imageSmoothingEnabled = false;
+    for (const part of template) {
+      sCtx.drawImage(part.image,
+        offX + part.offsetX * scale,
+        offY + part.offsetY * scale,
+        part.image.width * scale,
+        part.image.height * scale);
+    }
+  }
+
+  const spriteDataUrl = spriteCanvas.toDataURL();
+  const name = rp.name || "???";
+  const gender = rp.look?.gender ? "Female" : "Male";
+
+  const overlay = document.createElement("div");
+  overlay.id = "player-info-modal";
+  overlay.className = "modal-overlay";
+  overlay.style.cssText = "cursor:none;z-index:200000;";
+  overlay.innerHTML = `
+    <div class="modal-panel" style="width:280px;">
+      <div class="modal-titlebar"><span class="modal-title">Character Info</span></div>
+      <div class="modal-body" style="padding:16px;text-align:center;">
+        <div style="margin:0 auto 12px;width:96px;height:96px;background:rgba(0,0,0,0.15);border-radius:8px;display:flex;align-items:center;justify-content:center;">
+          <img src="${spriteDataUrl}" width="96" height="96" style="image-rendering:pixelated;" />
+        </div>
+        <div style="font-size:14px;font-weight:bold;color:#f0e6d3;margin-bottom:4px;">${name}</div>
+        <div style="font-size:11px;color:#999;margin-bottom:12px;">${gender}</div>
+        <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:10px;">
+          <div style="font-size:12px;color:#b0a090;font-weight:bold;margin-bottom:6px;">Accomplishments</div>
+          <div style="font-size:11px;color:#777;font-style:italic;">None yet</div>
+        </div>
+      </div>
+      <div class="modal-buttons" style="margin-bottom:8px;">
+        <button class="modal-btn modal-btn-cancel" id="player-info-close">Close</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close = () => { overlay.remove(); };
+  overlay.querySelector("#player-info-close").addEventListener("click", (e) => {
+    e.stopPropagation();
+    playUISound("BtMouseClick");
+    close();
+  });
+  overlay.addEventListener("pointerdown", (e) => {
+    if (e.target === overlay) close();
+  });
+  // Escape to close
+  const onKey = (e) => { if (e.key === "Escape") { close(); window.removeEventListener("keydown", onKey); } };
+  window.addEventListener("keydown", onKey);
+}
+
 function drawRemotePlayerNameLabel(rp) {
   const screen = worldToScreen(rp.renderX, rp.renderY);
   ctx.save();
@@ -11811,6 +11917,17 @@ function bindInput() {
       if (npc) nextState = CURSOR_CANCLICK;
     }
     setCursorState(nextState);
+  });
+
+  canvasEl.addEventListener("dblclick", (e) => {
+    if (runtime.loading.active || runtime.portalWarpInProgress || runtime.npcDialogue.active) return;
+    const rect = canvasEl.getBoundingClientRect();
+    const cx = (e.clientX - rect.left) * (canvasEl.width / rect.width);
+    const cy = (e.clientY - rect.top) * (canvasEl.height / rect.height);
+    const rp = findRemotePlayerAtScreen(cx, cy);
+    if (rp) {
+      showPlayerInfoModal(rp);
+    }
   });
 
   window.addEventListener("keydown", (event) => {
