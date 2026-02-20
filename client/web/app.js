@@ -5275,30 +5275,10 @@ function hasProjectileAmmo() {
   return false;
 }
 
-/**
- * Determine if the current attack should be degenerate (C++ Player::prepare_attack).
- * - Prone → always degenerate
- * - Bow/Crossbow/Claw/Gun without ammo → degenerate
- * - Wand/Staff without skill → degenerate (we treat as always degenerate for now since no skills)
- */
-function isAttackDegenerate() {
-  const player = runtime.player;
-  const isProne = player.action === "prone" || player.action === "sit";
-  if (isProne) return true;
-
-  const weapon = playerEquipped.get("Weapon");
-  if (!weapon) return false;
-  const weaponPrefix = Math.floor(weapon.id / 10000);
-
-  // Ranged weapons: degenerate if no ammo
-  if (weaponPrefix === 145 || weaponPrefix === 146 || weaponPrefix === 147 || weaponPrefix === 149) {
-    return !hasProjectileAmmo();
-  }
-  // Wand/Staff: degenerate if no skill (we have no skill system yet → always degenerate)
-  // Actually, C++ only degenerates wand/staff when the player tries to use a skill but has none.
-  // For regular attack, wand/staff use normal swingO stances. So don't degenerate here.
-  return false;
-}
+// Note: In C++, degenerate attack only applies when prone (proneStab).
+// Ranged weapons without ammo are BLOCKED entirely (RegularAttack::can_use → FBR_BULLETCOST).
+// Wand/Staff degenerate is for skills only (not regular attack).
+// So isAttackDegenerate is no longer needed — prone check is inlined in performAttack.
 
 const damageNumbers = []; // { x, y, vspeed, value, critical, opacity, miss }
 
@@ -6395,29 +6375,51 @@ function performAttack() {
   if (player.climbing) return;
   if (now < player.attackCooldownUntil) return;
 
+  // C++ RegularAttack::can_use — ranged weapons require ammo to attack
+  const weapon = playerEquipped.get("Weapon");
+  if (weapon) {
+    const wpfx = Math.floor(weapon.id / 10000);
+    if (WEAPON_AMMO_PREFIXES[wpfx] && !hasProjectileAmmo()) {
+      // C++ ForbidSkillMessage: show "no arrows/stars/bullets" in chat
+      const ammoMsg = wpfx === 145 || wpfx === 146 ? "Please equip arrows first."
+                    : wpfx === 147 ? "Please equip throwing stars first."
+                    : "Please equip bullets first.";
+      const sysMsg = { name: "", text: ammoMsg, timestamp: Date.now(), type: "system" };
+      runtime.chat.history.push(sysMsg);
+      if (runtime.chat.history.length > runtime.chat.maxHistory) runtime.chat.history.shift();
+      appendChatLogMessage(sysMsg);
+      player.attackCooldownUntil = now + 300; // brief cooldown to prevent spam
+      return;
+    }
+  }
+
   // C++ Player::prepare_attack + CharLook::getattackstance
   const isProne = player.action === "prone" || player.action === "sit";
-  const degenerate = isAttackDegenerate();
   let attackStance;
   if (isProne && getCharacterActionFrames("proneStab").length > 0) {
     attackStance = "proneStab";
   } else {
-    const stances = getWeaponAttackStances(degenerate);
+    const stances = getWeaponAttackStances(false);
     const stanceIdx = Math.floor(Math.random() * stances.length);
     attackStance = stances[stanceIdx] || "swingO1";
   }
 
   // Start attack animation
   player.attacking = true;
-  player.attackDegenerate = degenerate; // C++ degenerate: prone, no ammo, or no skill
+  player.attackDegenerate = isProne; // C++ degenerate only applies when prone
   player.attackStance = attackStance;
   player.attackFrameIndex = 0;
   player.attackFrameTimer = 0;
   player.attackCooldownUntil = now + ATTACK_COOLDOWN_MS;
 
   // C++ CharLook::attack → weapon.get_usesound(degenerate).play()
+  // Degenerate (prone) uses Attack2 if it exists, otherwise falls back to Attack
   const sfxKey = getWeaponSfxKey();
-  playSfx("Weapon", `${sfxKey}/Attack`);
+  if (isProne) {
+    playSfxWithFallback("Weapon", `${sfxKey}/Attack2`, `${sfxKey}/Attack`);
+  } else {
+    playSfx("Weapon", `${sfxKey}/Attack`);
+  }
   wsSend({ type: "attack", stance: attackStance });
 
   // Find closest mob in range (mobcount=1 for regular attack)
@@ -12980,6 +12982,23 @@ async function playSfx(soundFile, soundName) {
   } catch (error) {
     console.warn("[audio] sfx failed", soundFile, soundName, error);
   }
+}
+
+/** Play a sound effect with a fallback if the primary doesn't exist. */
+async function playSfxWithFallback(soundFile, soundName, fallbackSoundName) {
+  try {
+    const dataUri = await requestSoundDataUri(soundFile, soundName);
+    if (dataUri) {
+      runtime.audioDebug.lastSfx = `${soundFile}/${soundName}`;
+      runtime.audioDebug.lastSfxAtMs = performance.now();
+      runtime.audioDebug.sfxPlayCount += 1;
+      if (!runtime.settings.sfxEnabled) return;
+      const audio = getSfxFromPool(dataUri);
+      if (audio) { audio.volume = 0.45; audio.play().catch(() => {}); }
+      return;
+    }
+  } catch (_) { /* primary not found, try fallback */ }
+  playSfx(soundFile, fallbackSoundName);
 }
 
 // Default mob sounds (Snail — 0100100, the most common base mob)
