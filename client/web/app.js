@@ -1374,7 +1374,9 @@ function handleServerMessage(msg) {
       if (rp) {
         rp.faceExpression = msg.expression;
         rp.faceFrameIndex = 0;
-        rp.faceExpressionExpires = performance.now() + 2500;
+        // Hit expressions are brief (500ms), emotes last longer (2.5s)
+        const isHitExpr = msg.expression === "hit" || msg.expression === "pain";
+        rp.faceExpressionExpires = performance.now() + (isHitExpr ? PLAYER_HIT_FACE_DURATION_MS : 2500);
         // Pre-warm face image for frame 0 of this expression to avoid decode blink
         const fFrames = getFaceExpressionFrames(msg.expression);
         if (fFrames.length > 0) {
@@ -7442,6 +7444,9 @@ function triggerPlayerHitVisuals(nowMs = performance.now()) {
     faceAnimation.frameTimerMs = 0;
     faceAnimation.overrideExpression = hitExpression;
     faceAnimation.overrideUntilMs = nowMs + PLAYER_HIT_FACE_DURATION_MS;
+
+    // Broadcast hit expression to other players (skip emote cooldown — hits are immediate)
+    wsSend({ type: "face", expression: hitExpression });
   }
 
   faceAnimation.blinkCooldownMs = randomBlinkCooldownMs();
