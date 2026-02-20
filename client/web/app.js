@@ -10990,7 +10990,29 @@ async function loadMap(mapId, spawnPortalName = null, spawnFromPortalTransfer = 
     showMapBanner(runtime.mapId);
 
     setStatus(`Loaded map ${runtime.mapId}. Click/hover canvas to control. Controls: ←/→ move, Space jump, ↑ grab rope, ↑/↓ climb, ↓ crouch, Enter to chat.`);
-    addSystemChatMessage(`[Welcome] Loaded map ${runtime.mapId}. Press Enter to chat.`);
+    const _welcomePhrases = [
+      "May the Maple Goddess watch over you! 🍁",
+      "Another adventurer arrives in Maple World!",
+      "The mushrooms tremble at your presence.",
+      "Your journey continues… press Enter to chat!",
+      "Welcome back, Mapler! The world awaits.",
+      "Henesys smells like fresh potions today.",
+      "The slimes are restless… stay sharp!",
+      "A wild adventurer appeared!",
+      "No botting, just vibes. 🍄",
+      "Grab your weapon — it's MapleStory time!",
+      "The Black Mage can wait. Enjoy the scenery.",
+      "Pro tip: don't fall off the ropes.",
+      "Somewhere, a snail is plotting revenge.",
+      "Legend says there's meso in every barrel.",
+      "Keep your potions close and your mesos closer.",
+      "The Maple World is brighter with you in it! ✨",
+      "Watch out for those Orange Mushrooms…",
+      "Remember: loot first, ask questions later.",
+      "Time to grind! Or just vibe. Your call.",
+      "Ellinia's forests whisper your name.",
+    ];
+    addSystemChatMessage(`Welcome — ${_welcomePhrases[Math.floor(Math.random() * _welcomePhrases.length)]}`);
     if (runtime.map?.swim) {
       addSystemChatMessage(`[Info] This is a water environment. Use arrow keys or Space to swim when airborne.`);
     }
