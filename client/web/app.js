@@ -10306,7 +10306,7 @@ function drawMinimap() {
     if (portal.type !== 2) continue;
     const px = toMinimapX(portal.x);
     const py = toMinimapY(portal.y);
-    ctx.fillStyle = "#fbbf24";
+    ctx.fillStyle = "#3b82f6"; // blue for visible portals
     ctx.beginPath();
     ctx.arc(px, py, MINIMAP_PORTAL_RADIUS, 0, Math.PI * 2);
     ctx.fill();
@@ -10327,7 +10327,7 @@ function drawMinimap() {
     if (life.type !== "n") continue;
     const lx = toMinimapX(life.x);
     const ly = toMinimapY(life.cy ?? life.y);
-    ctx.fillStyle = "#38bdf8";
+    ctx.fillStyle = "#22c55e"; // green for NPCs
     ctx.beginPath();
     ctx.arc(lx, ly, 2, 0, Math.PI * 2);
     ctx.fill();
@@ -10337,18 +10337,18 @@ function drawMinimap() {
   for (const [, rp] of remotePlayers) {
     const rpx = toMinimapX(rp.renderX);
     const rpy = toMinimapY(rp.renderY);
-    ctx.fillStyle = "#60a5fa"; // blue — C++ "another" marker color
+    ctx.fillStyle = "#ef4444"; // red for other players
     ctx.beginPath();
     ctx.arc(rpx, rpy, MINIMAP_PLAYER_RADIUS, 0, Math.PI * 2);
     ctx.fill();
   }
 
   // Draw player marker (C++ draw_movable_markers → marker["user"])
-  const px = toMinimapX(runtime.player.x);
-  const py = toMinimapY(runtime.player.y);
-  ctx.fillStyle = "#22c55e";
+  const playerMmX = toMinimapX(runtime.player.x);
+  const playerMmY = toMinimapY(runtime.player.y);
+  ctx.fillStyle = "#facc15"; // yellow for local player
   ctx.beginPath();
-  ctx.arc(px, py, MINIMAP_PLAYER_RADIUS, 0, Math.PI * 2);
+  ctx.arc(playerMmX, playerMmY, MINIMAP_PLAYER_RADIUS, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = "#fff";
   ctx.lineWidth = 1;
