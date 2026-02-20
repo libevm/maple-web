@@ -73,15 +73,24 @@ Keyed by slot type (e.g. `"Coat"`, `"Weapon"`). Each value:
 }
 ```
 
-### Default Equipment (`DEFAULT_EQUIPS`)
+### New Character Defaults (`newCharacterDefaults(gender)`)
 
-Starting gear loaded at init:
-```js
-{ id: 1040002, category: "Coat",   path: "Coat/01040002.img.json" }
-{ id: 1060002, category: "Pants",  path: "Pants/01060002.img.json" }
-{ id: 1072001, category: "Shoes",  path: "Shoes/01072001.img.json" }
-{ id: 1302000, category: "Weapon", path: "Weapon/01302000.img.json" }
-```
+Gender-aware starting gear and appearance, computed once at character creation.
+The server (`db.ts: buildDefaultCharacterSave`) is the authoritative source;
+the client mirrors this for offline mode only.
+
+| Part | Male | Female |
+|------|------|--------|
+| `face_id` | 20000 | 21000 |
+| `hair_id` | 30000 | 31000 |
+| Coat | 1040002 | 1041002 |
+| Pants | 1060002 | 1061002 |
+| Shoes | 1072001 | 1072001 (unisex) |
+| Weapon | 1302000 | 1302000 (unisex) |
+
+After creation, `face_id`, `hair_id`, and equipment are **stored character state**
+on `runtime.player` and in the save data. They are never re-derived from gender —
+they can be changed independently (e.g. hair salon, equip swap).
 
 ### `runtime.characterEquipData` (Object)
 
@@ -171,8 +180,12 @@ async function loadEquipWzData(equipId) {
 
 ### Initial Load (`requestCharacterData`)
 
-On first character data request, builds equip fetch list from current `playerEquipped`:
+On first character data request, fetches face/hair WZ from `runtime.player.face_id` /
+`runtime.player.hair_id` (via `playerFacePath()` / `playerHairPath()`), and builds equip
+fetch list from current `playerEquipped`:
 ```js
+fetchJson(`/resources/Character.wz/${playerFacePath()}`),  // e.g. Face/00021000.img.json
+fetchJson(`/resources/Character.wz/${playerHairPath()}`),  // e.g. Hair/00031000.img.json
 const equipEntries = [...playerEquipped.entries()].map(([slotType, eq]) => ({
   id: eq.id,
   category: equipWzCategoryFromId(eq.id) || slotType,

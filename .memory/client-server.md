@@ -42,15 +42,39 @@
 - Name stored in character save, associated with session ID
 - Name is immutable once claimed (future: rename token)
 
-### Auth (Optional, Phase 2)
-- **Phase 1**: No auth — session token = identity. Low friction. Anyone with the token owns the character.
-- **Phase 2 (recommended)**: Add optional **passphrase** (4-8 word phrase) that the player sets.
-  - Used to recover session from another browser: enter name + passphrase → server returns session ID
-  - No email, no password complexity, no OAuth — just a memorable phrase
-  - Stored as bcrypt hash server-side
-  - Players who don't set a passphrase keep the localStorage-only session (no recovery)
-- **Why passphrase**: zero friction to start, optional recovery, no email infrastructure,
-  memorable enough for the target audience, MapleStory-thematic
+### Account Claiming & Login (Implemented)
+
+**Unclaimed accounts** (default): session ID = identity. Anyone with the localStorage token owns the character. No password, zero friction.
+
+**Claiming**: Player can set a password (min 4 chars) via the glowing 🔒 HUD button.
+- `POST /api/character/claim` with `{ password }` → bcrypt hashed, stored in `credentials` table
+- Once claimed, the HUD button disappears
+- Claimed accounts can be logged into from any device/browser
+
+**Login**: Character creation overlay defaults to Login tab (online mode).
+- `POST /api/character/login` with `{ name, password }` → bcrypt verify → returns `session_id`
+- Client stores returned session ID in localStorage, reloads page
+- No auth header needed on login endpoint (it IS the auth)
+
+**Logout**: Settings > Log Out button.
+- Dynamic warning text: claimed = "You can log back in", unclaimed = "Character will be lost!"
+- Clears localStorage (session, save, settings), disconnects WS, reloads
+
+**DB schema**:
+```sql
+CREATE TABLE credentials (
+  session_id TEXT PRIMARY KEY REFERENCES characters(session_id),
+  password_hash TEXT NOT NULL,
+  claimed_at TEXT DEFAULT (datetime('now'))
+);
+```
+
+**REST endpoints**:
+```
+POST /api/character/claim   Body: { password }      Auth: Bearer <session-id>  → 200/400/409
+GET  /api/character/claimed                          Auth: Bearer <session-id>  → 200 { claimed: bool }
+POST /api/character/login   Body: { name, password } No auth header needed      → 200/401/404
+```
 
 ### Name Reservation Table (SQLite)
 ```sql
@@ -70,10 +94,14 @@ CREATE TABLE names (
 | Field | Type | Default | Code Source |
 |-------|------|---------|-------------|
 | `name` | string | `"MapleWeb"` | `runtime.player.name` |
-| `gender` | boolean | `false` (male) | Not yet impl |
+| `gender` | boolean | `false` (male) | `runtime.player.gender` |
 | `skin` | number | `0` | Not yet impl |
-| `face_id` | number | `20000` | Hardcoded |
-| `hair_id` | number | `30000` | `DEFAULT_HAIR_ID` |
+| `face_id` | number | `20000` (male) / `21000` (female) | `runtime.player.face_id` |
+| `hair_id` | number | `30000` (male) / `31000` (female) | `runtime.player.hair_id` |
+
+> `face_id` and `hair_id` are stored character state, set once at creation based
+> on gender, then persisted in save data. They are NOT re-derived from gender —
+> they can be changed independently (e.g. hair salon).
 
 ### 2. `character_stats`
 
@@ -105,7 +133,9 @@ CREATE TABLE names (
 |-------|------|---------|-------------|
 | `equipped` | array of `{slot_type, item_id, item_name}` | See below | `playerEquipped` |
 
-Default: Coat:1040002, Pants:1060002, Shoes:1072001, Weapon:1302000
+Defaults (gender-aware, set at creation):
+- Male: Coat:1040002, Pants:1060002, Shoes:1072001, Weapon:1302000
+- Female: Coat:1041002, Pants:1061002, Shoes:1072001, Weapon:1302000
 
 ### 5. `character_inventory`
 

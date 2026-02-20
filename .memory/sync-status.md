@@ -1,6 +1,6 @@
 # .memory Sync Status
 
-Last synced: 2026-02-20T16:00:00+11:00
+Last synced: 2026-02-20T06:00:00+11:00
 Status: ✅ Synced
 
 ## Current authoritative memory files
@@ -20,8 +20,10 @@ Status: ✅ Synced
 | `cpp-port-architecture-snapshot.md` | C++ reference client architecture snapshot (read-only reference) |
 
 ## Codebase Metrics
-- `client/web/app.js`: ~10,400 lines (will be split into modules in Phase 4)
-- CI: `bun run ci` ✅
+- `client/web/app.js`: ~11,580 lines
+- CI: `bun run ci` ✅ (167 tests across 6 suites)
+- `runtime.player.face_id` / `runtime.player.hair_id`: stored character state (not derived from gender)
+- FPS counter includes ping display (color-coded, 10s interval)
 
 ## Key Architecture Decisions
 
@@ -32,11 +34,13 @@ Status: ✅ Synced
 - Soft-predicted local movement: small error → lerp (100-300ms), large error → snap
 - Proximity culling: only relay within same map room
 
-### Session model
+### Session & auth model
 - Session ID = random UUID in localStorage (`mapleweb.session`)
 - Character name first-come-first-serve, immutable once claimed
-- Character creation: name + gender picker on first login (after resources loaded)
-- Auth optional (Phase 2): passphrase recovery, no email/OAuth
+- Character creation: Login/Create tabs on first visit (online defaults to Login tab)
+- Account claiming: optional password (min 4 chars) via glowing HUD button → bcrypt hashed
+- Login: name + password → server returns session_id → client adopts it
+- Logout: clears localStorage, warns unclaimed accounts about data loss
 
 ### WebSocket protocol
 - Auth via `{ type: "auth", session_id: "..." }` (JSON, first message, includes type field)
@@ -47,8 +51,10 @@ Status: ✅ Synced
 - Default character created on first WS auth if none exists
 
 ### Remote player rendering (C++ OtherChar parity)
-- Movement queue with timer-based consumption (not instant apply)
-- Position: delta per tick (target - current), not direct lerp
+- **Snapshot interpolation**: buffer received positions with timestamps, render 100ms
+  "in the past", lerp between bracketing snapshots. Eliminates jitter regardless of ping.
+- Constants: `REMOTE_INTERP_DELAY_MS=100`, `REMOTE_SNAPSHOT_MAX=20`
+- Teleport detection: >300px between snapshots → instant snap
 - Animation fully local: client runs frame timers per remote player
 - Per-player equip WZ data storage (separate from local player)
 
@@ -78,5 +84,5 @@ SESSION_KEY = "mapleweb.session"
 CHARACTER_SAVE_KEY = "mapleweb.character.v1"
 SETTINGS_CACHE_KEY = "mapleweb.settings.v1"
 KEYBINDS_STORAGE_KEY = "mapleweb.keybinds.v1"
-// Tooltip z-index: 99990 | Cursor z-index: 99999
+// Tooltip z-index: 99990 | Cursor z-index: 999999 | Ghost item: 999998
 ```
