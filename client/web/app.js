@@ -3356,6 +3356,14 @@ function createDropFromServer(dropData, animate) {
     });
   }
 
+  // Use local foothold detection for landing Y (same rules as user drops)
+  let destY = dropData.destY;
+  if (runtime.map) {
+    const fh = findFootholdAtXNearY(runtime.map, dropData.x, dropData.destY, 60)
+            || findFootholdBelow(runtime.map, dropData.x, (dropData.startY || dropData.destY) - 100);
+    if (fh) destY = fh.y - 4;
+  }
+
   groundDrops.push({
     drop_id: dropData.drop_id,
     id: dropData.item_id,
@@ -3364,8 +3372,8 @@ function createDropFromServer(dropData, animate) {
     iconKey: iconKey,
     category: dropData.category || null,
     x: dropData.x,
-    y: animate ? (dropData.startY || dropData.destY) : dropData.destY,
-    destY: dropData.destY,
+    y: animate ? (dropData.startY || destY) : destY,
+    destY: destY,
     vy: animate ? DROP_SPAWN_VSPEED : 0,
     onGround: !animate,
     opacity: 1.0,
@@ -6705,7 +6713,7 @@ async function loadReactorAnimation(reactorId) {
                   }
                   hit.push({ key, width: meta.width, height: meta.height,
                     originX: hRec.originX ?? 0, originY: hRec.originY ?? 0,
-                    delay: Math.max(hRec.delay ?? 120, 250), basedata: meta.basedata });
+                    delay: Math.max(hRec.delay ?? 120, 350), basedata: meta.basedata });
                 }
               }
             }
@@ -6823,16 +6831,16 @@ function updateReactorAnimations(dt) {
       rs.opacity = Math.max(0, rs.opacity - dt * 3); // ~0.33s fade out
     }
 
-    // Hit animation playback
+    // Hit animation playback — C++: animations[state] = src[state]["hit"]
+    // Only plays the EXACT state's hit anim; no fallback to other states.
     if (rs.hitAnimPlaying) {
-      // Use hitAnimState (the pre-hit state) for animation lookup, matching C++ behavior
       const animState = rs.hitAnimState ?? rs.state;
-      let hitFrames = [];
-      for (let s = animState; s >= 0; s--) {
-        const sd = anim.states[s];
-        if (sd?.hit?.length > 0) { hitFrames = sd.hit; break; }
-      }
-      if (hitFrames.length > 0) {
+      const stateData = anim.states[animState];
+      const hitFrames = stateData?.hit ?? [];
+      if (hitFrames.length === 0) {
+        // C++: states with no hit anim → animation_ended = true immediately
+        rs.hitAnimPlaying = false;
+      } else {
         const frame = hitFrames[rs.hitAnimFrameIndex];
         if (frame) {
           rs.hitAnimElapsed += dt * 1000;
@@ -6846,8 +6854,6 @@ function updateReactorAnimations(dt) {
         } else {
           rs.hitAnimPlaying = false;
         }
-      } else {
-        rs.hitAnimPlaying = false;
       }
     }
 
@@ -6887,14 +6893,13 @@ function drawReactors() {
     // Pick the right frame to draw
     let frame = null;
     if (rs.hitAnimPlaying) {
-      // Use hitAnimState (pre-hit state) for animation, matching C++ behavior
+      // C++: animations.at(state - 1).draw() — use exact state, no fallback
       const animState = rs.hitAnimState ?? rs.state;
-      let hitFrames = [];
-      for (let s = animState; s >= 0; s--) {
-        const sd = anim.states[s];
-        if (sd?.hit?.length > 0) { hitFrames = sd.hit; break; }
+      const stateData = anim.states[animState];
+      const hitFrames = stateData?.hit ?? [];
+      if (hitFrames.length > 0) {
+        frame = hitFrames[rs.hitAnimFrameIndex] ?? hitFrames[0];
       }
-      frame = hitFrames[rs.hitAnimFrameIndex] ?? hitFrames[0];
     }
     if (!frame) {
       // Use idle frame for current state; fall back through earlier states until one has frames
@@ -6910,8 +6915,13 @@ function drawReactors() {
     const img = getImageByKey(frame.key);
     if (!img) continue;
 
+    // C++ draw shift: shift = (0, normal.get_origin().y()) where normal = state 0 idle
+    // This makes the sprite bottom align with the foothold position.
+    const state0Idle = anim.states[0]?.idle?.[0];
+    const normalOriginY = state0Idle?.originY ?? 0;
+
     const screenX = Math.round(reactor.x - cam.x + halfW);
-    const screenY = Math.round(reactor.y - cam.y + halfH);
+    const screenY = Math.round(reactor.y - cam.y + halfH - normalOriginY);
 
     if (
       screenX + img.width < -100 || screenX - img.width > canvasEl.width + 100 ||
