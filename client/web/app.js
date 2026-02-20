@@ -5226,6 +5226,62 @@ function getWeaponSfxKey() {
   return WEAPON_SFX_BY_PREFIX[prefix] || "swordL";
 }
 
+// ─── Projectile / Ammo Detection (C++ Inventory::has_projectile) ─────────
+// Ranged weapons require ammo in the USE tab to fire normally.
+// Without ammo, the attack is "degenerate" (melee swing, 1/10 damage).
+// Weapon prefix → set of valid ammo item ID prefixes (id / 10000)
+const WEAPON_AMMO_PREFIXES = {
+  145: [206],        // Bow → Arrows for Bow (2060xxx) & Crossbow (2061xxx)
+  146: [206],        // Crossbow → Arrows (2060xxx, 2061xxx)
+  147: [207],        // Claw → Throwing Stars (2070xxx)
+  149: [233],        // Gun → Bullets (2330xxx)
+};
+
+/**
+ * Check if the player has projectile ammo in their USE inventory.
+ * C++ Inventory::has_projectile — checks bulletslot > 0.
+ * We check if any USE item matches the required ammo prefix for the weapon.
+ */
+function hasProjectileAmmo() {
+  const weapon = playerEquipped.get("Weapon");
+  if (!weapon) return true; // no weapon = not ranged
+  const weaponPrefix = Math.floor(weapon.id / 10000);
+  const ammoPrefixes = WEAPON_AMMO_PREFIXES[weaponPrefix];
+  if (!ammoPrefixes) return true; // weapon doesn't need ammo
+  // Search USE inventory for matching ammo
+  for (const item of playerInventory) {
+    if (item.invType !== "USE") continue;
+    const itemPrefix = Math.floor(item.id / 10000);
+    if (ammoPrefixes.includes(itemPrefix)) return true;
+  }
+  return false;
+}
+
+/**
+ * Determine if the current attack should be degenerate (C++ Player::prepare_attack).
+ * - Prone → always degenerate
+ * - Bow/Crossbow/Claw/Gun without ammo → degenerate
+ * - Wand/Staff without skill → degenerate (we treat as always degenerate for now since no skills)
+ */
+function isAttackDegenerate() {
+  const player = runtime.player;
+  const isProne = player.action === "prone" || player.action === "sit";
+  if (isProne) return true;
+
+  const weapon = playerEquipped.get("Weapon");
+  if (!weapon) return false;
+  const weaponPrefix = Math.floor(weapon.id / 10000);
+
+  // Ranged weapons: degenerate if no ammo
+  if (weaponPrefix === 145 || weaponPrefix === 146 || weaponPrefix === 147 || weaponPrefix === 149) {
+    return !hasProjectileAmmo();
+  }
+  // Wand/Staff: degenerate if no skill (we have no skill system yet → always degenerate)
+  // Actually, C++ only degenerates wand/staff when the player tries to use a skill but has none.
+  // For regular attack, wand/staff use normal swingO stances. So don't degenerate here.
+  return false;
+}
+
 const damageNumbers = []; // { x, y, vspeed, value, critical, opacity, miss }
 
 // ─── WZ Damage Number Sprites ────────────────────────────────────────────────
@@ -6321,20 +6377,21 @@ function performAttack() {
   if (player.climbing) return;
   if (now < player.attackCooldownUntil) return;
 
-  // C++ CharLook::getattackstance: if prone → PRONESTAB, else random weapon stance
+  // C++ Player::prepare_attack + CharLook::getattackstance
   const isProne = player.action === "prone" || player.action === "sit";
+  const degenerate = isAttackDegenerate();
   let attackStance;
   if (isProne && getCharacterActionFrames("proneStab").length > 0) {
     attackStance = "proneStab";
   } else {
-    const stances = getWeaponAttackStances(isProne);
+    const stances = getWeaponAttackStances(degenerate);
     const stanceIdx = Math.floor(Math.random() * stances.length);
     attackStance = stances[stanceIdx] || "swingO1";
   }
 
   // Start attack animation
   player.attacking = true;
-  player.attackDegenerate = isProne; // C++ degenerate = true when prone
+  player.attackDegenerate = degenerate; // C++ degenerate: prone, no ammo, or no skill
   player.attackStance = attackStance;
   player.attackFrameIndex = 0;
   player.attackFrameTimer = 0;
