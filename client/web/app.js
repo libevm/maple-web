@@ -2029,7 +2029,6 @@ function showPlayerInfoModal(rp) {
   if (document.querySelector("#player-info-modal")) return;
 
   const name = rp.name || "???";
-  const gender = rp.look?.gender ? "Female" : "Male";
 
   const overlay = document.createElement("div");
   overlay.id = "player-info-modal";
@@ -2045,7 +2044,6 @@ function showPlayerInfoModal(rp) {
       <div class="modal-body" style="padding:14px 16px 12px;text-align:center;">
         <canvas id="player-info-sprite" width="80" height="80"
           style="display:block;margin:0 auto 10px;image-rendering:pixelated;"></canvas>
-        <div style="font-size:11px;color:#8a9bb5;margin-bottom:10px;">${gender}</div>
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:8px;">
           <div style="font-size:11px;color:#8a9bb5;margin-bottom:4px;">Accomplishments</div>
           <div style="font-size:11px;color:#5a6a7a;font-style:italic;">None yet</div>
