@@ -90,7 +90,7 @@ export interface WSClient {
   /** Server-tracked stats (updated by client via save_state) */
   stats: PlayerStats;
   /** Server-tracked achievements (JQ completions, etc.) */
-  achievements: Record<string, number>;
+  achievements: Record<string, any>;
 }
 
 export interface WSClientData {
@@ -311,7 +311,7 @@ export class RoomManager {
   getMapState(mapId: string): Array<{
     id: string; name: string; x: number; y: number;
     action: string; facing: number; look: PlayerLook; chair_id: number;
-    achievements: Record<string, number>;
+    achievements: Record<string, any>;
   }> {
     const room = this.rooms.get(mapId);
     if (!room) return [];
@@ -668,13 +668,20 @@ export function handleClientMessage(
           meso: Number(s.meso) ?? client.stats.meso,
         };
       }
-      // Merge achievements from client (take max — server is authoritative but client may have offline data)
-      if (msg.achievements && typeof msg.achievements === "object" && !Array.isArray(msg.achievements)) {
+      // Merge jq_quests from client (take max — server is authoritative but client may have offline data)
+      if (msg.achievements && typeof msg.achievements === "object") {
         const clientAch = msg.achievements as Record<string, unknown>;
-        for (const [key, val] of Object.entries(clientAch)) {
-          const n = Number(val);
-          if (typeof n === "number" && n > 0) {
-            client.achievements[key] = Math.max(client.achievements[key] || 0, n);
+        if (clientAch.jq_quests && typeof clientAch.jq_quests === "object") {
+          if (!client.achievements.jq_quests || typeof client.achievements.jq_quests !== "object") {
+            client.achievements.jq_quests = {};
+          }
+          const serverJq = client.achievements.jq_quests as Record<string, number>;
+          const clientJq = clientAch.jq_quests as Record<string, number>;
+          for (const [key, val] of Object.entries(clientJq)) {
+            const n = Number(val);
+            if (n > 0) {
+              serverJq[key] = Math.max(serverJq[key] || 0, n);
+            }
           }
         }
       }
@@ -851,9 +858,13 @@ export function handleClientMessage(
         category: reward.category === "EQUIP" ? "Weapon" : null, // generic category
       });
 
-      // Increment achievement
+      // Increment achievement under jq_quests namespace
       const achKey = jqInfo.questName;
-      client.achievements[achKey] = (client.achievements[achKey] || 0) + 1;
+      if (!client.achievements.jq_quests || typeof client.achievements.jq_quests !== "object") {
+        client.achievements.jq_quests = {};
+      }
+      const jqQuests = client.achievements.jq_quests as Record<string, number>;
+      jqQuests[achKey] = (jqQuests[achKey] || 0) + 1;
 
       // Persist immediately
       persistClientState(client, _moduleDb);
@@ -866,7 +877,7 @@ export function handleClientMessage(
         item_name: itemName,
         item_qty: reward.qty,
         item_category: reward.category,
-        completions: client.achievements[achKey],
+        completions: jqQuests[achKey],
       });
 
       // Warp player back to Mushroom Park

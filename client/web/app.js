@@ -1968,9 +1968,10 @@ function handleServerMessage(msg) {
         });
       }
 
-      // Update local achievements
+      // Update local achievements under jq_quests
       const completions = Number(msg.completions) || 1;
-      runtime.player.achievements[questName] = completions;
+      if (!runtime.player.achievements.jq_quests) runtime.player.achievements.jq_quests = {};
+      runtime.player.achievements.jq_quests[questName] = completions;
 
       // Grey system message in chat
       const sysMsg = {
@@ -2545,7 +2546,7 @@ function showPlayerInfoModal(rp) {
         <canvas id="player-info-sprite" width="80" height="80"
           style="display:block;margin:0 auto 10px;image-rendering:pixelated;"></canvas>
         <div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:8px;">
-          <div style="font-size:11px;color:#8a9bb5;margin-bottom:4px;">Accomplishments</div>
+          <div style="font-size:11px;color:#8a9bb5;margin-bottom:4px;">Achievements</div>
           <div id="player-info-achievements" style="font-size:11px;"></div>
         </div>
       </div>
@@ -2553,10 +2554,10 @@ function showPlayerInfoModal(rp) {
   `;
   document.body.appendChild(overlay);
 
-  // Populate achievements
+  // Populate accomplishments (only jq_quests)
   const achDiv = overlay.querySelector("#player-info-achievements");
-  const achs = rp.achievements || {};
-  const achEntries = Object.entries(achs).filter(([, v]) => typeof v === "number" && v > 0);
+  const jqQuests = (rp.achievements && rp.achievements.jq_quests) || {};
+  const achEntries = Object.entries(jqQuests).filter(([, v]) => typeof v === "number" && v > 0);
   if (achEntries.length === 0) {
     achDiv.innerHTML = `<div style="color:#5a6a7a;font-style:italic;">None yet</div>`;
   } else {

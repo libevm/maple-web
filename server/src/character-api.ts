@@ -183,10 +183,24 @@ export async function handleCharacterRequest(
     }
 
     // Preserve server-authoritative achievements — client save must not overwrite them
-    const existingData = existing as Record<string, unknown>;
-    const bodyObj = body as Record<string, unknown>;
+    const existingData = existing as Record<string, any>;
+    const bodyObj = body as Record<string, any>;
     if (existingData.achievements && typeof existingData.achievements === "object") {
-      bodyObj.achievements = existingData.achievements;
+      // Merge: keep server jq_quests (take max), preserve client structure
+      if (!bodyObj.achievements || typeof bodyObj.achievements !== "object") bodyObj.achievements = {};
+      const serverJq = existingData.achievements.jq_quests;
+      const clientJq = bodyObj.achievements.jq_quests;
+      if (serverJq && typeof serverJq === "object") {
+        if (!clientJq || typeof clientJq !== "object") {
+          bodyObj.achievements.jq_quests = { ...serverJq };
+        } else {
+          for (const [k, v] of Object.entries(serverJq)) {
+            const sv = Number(v) || 0;
+            const cv = Number(clientJq[k]) || 0;
+            bodyObj.achievements.jq_quests[k] = Math.max(sv, cv);
+          }
+        }
+      }
     }
 
     saveCharacterData(db, sessionId, JSON.stringify(bodyObj));
