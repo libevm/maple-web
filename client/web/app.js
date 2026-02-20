@@ -1966,35 +1966,45 @@ function findRemotePlayerAtScreen(screenX, screenY) {
 }
 
 /**
- * Show a HUD-styled modal with a remote player's character info.
+ * Render a remote player's character sprite to a canvas element.
+ * Ensures look data (face/hair) is loaded first, then retries until
+ * all image parts are decoded and rendered.
  */
-function showPlayerInfoModal(rp) {
-  // Don't stack modals
-  if (document.querySelector("#player-info-modal")) return;
+async function renderRemotePlayerSprite(rp, canvasEl) {
+  const SIZE = 120;
+  canvasEl.width = SIZE;
+  canvasEl.height = SIZE;
 
-  // Render character sprite to an offscreen canvas
-  const spriteCanvas = document.createElement("canvas");
-  spriteCanvas.width = 96;
-  spriteCanvas.height = 96;
-  const sCtx = spriteCanvas.getContext("2d");
+  // Ensure face/hair WZ data is loaded before rendering
+  if (!remoteLookData.has(rp.id)) {
+    await loadRemotePlayerLookData(rp);
+  }
 
-  const template = getRemotePlayerPlacementTemplate(rp, "stand1", 0, false, "default", 0);
-  if (template && template.length > 0) {
-    // Find bounding box of all parts
+  // Retry loop: template parts depend on async image decoding
+  for (let attempt = 0; attempt < 20; attempt++) {
+    // Invalidate template cache so fresh images are picked up
+    remoteTemplateCache.delete(rp.id);
+    const template = getRemotePlayerPlacementTemplate(rp, rp.action, rp.frameIndex, false, "default", 0);
+    if (!template || template.length === 0) {
+      await new Promise(r => setTimeout(r, 100));
+      continue;
+    }
+
+    const sCtx = canvasEl.getContext("2d");
+    sCtx.clearRect(0, 0, SIZE, SIZE);
+
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const part of template) {
-      const px = part.offsetX;
-      const py = part.offsetY;
-      minX = Math.min(minX, px);
-      minY = Math.min(minY, py);
-      maxX = Math.max(maxX, px + part.image.width);
-      maxY = Math.max(maxY, py + part.image.height);
+      minX = Math.min(minX, part.offsetX);
+      minY = Math.min(minY, part.offsetY);
+      maxX = Math.max(maxX, part.offsetX + part.image.width);
+      maxY = Math.max(maxY, part.offsetY + part.image.height);
     }
     const spriteW = maxX - minX;
     const spriteH = maxY - minY;
-    const scale = Math.min(96 / spriteW, 96 / spriteH, 2);
-    const offX = (96 - spriteW * scale) / 2 - minX * scale;
-    const offY = (96 - spriteH * scale) / 2 - minY * scale;
+    const scale = Math.min(SIZE / spriteW, SIZE / spriteH, 2.5);
+    const offX = (SIZE - spriteW * scale) / 2 - minX * scale;
+    const offY = (SIZE - spriteH * scale) / 2 - minY * scale;
 
     sCtx.imageSmoothingEnabled = false;
     for (const part of template) {
@@ -2004,28 +2014,37 @@ function showPlayerInfoModal(rp) {
         part.image.width * scale,
         part.image.height * scale);
     }
-  }
 
-  const spriteDataUrl = spriteCanvas.toDataURL();
+    // Check if hair rendered — if not, wait for image decode and retry
+    const hasHair = template.some(p => typeof p.name === "string" && p.name.includes("hair"));
+    if (hasHair) break;
+    await new Promise(r => setTimeout(r, 120));
+  }
+}
+
+/**
+ * Show a HUD-styled modal with a remote player's character info.
+ */
+function showPlayerInfoModal(rp) {
+  if (document.querySelector("#player-info-modal")) return;
+
   const name = rp.name || "???";
   const gender = rp.look?.gender ? "Female" : "Male";
 
   const overlay = document.createElement("div");
   overlay.id = "player-info-modal";
   overlay.className = "modal-overlay";
-  overlay.style.cssText = "cursor:none;z-index:200000;";
+  overlay.style.cssText = "cursor:none;z-index:200000;user-select:none;";
   overlay.innerHTML = `
-    <div class="modal-panel" style="width:280px;">
-      <div class="modal-titlebar"><span class="modal-title">Character Info</span></div>
-      <div class="modal-body" style="padding:16px;text-align:center;">
-        <div style="margin:0 auto 12px;width:96px;height:96px;background:rgba(0,0,0,0.15);border-radius:8px;display:flex;align-items:center;justify-content:center;">
-          <img src="${spriteDataUrl}" width="96" height="96" style="image-rendering:pixelated;" />
-        </div>
-        <div style="font-size:14px;font-weight:bold;color:#f0e6d3;margin-bottom:4px;">${name}</div>
-        <div style="font-size:11px;color:#999;margin-bottom:12px;">${gender}</div>
-        <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:10px;">
-          <div style="font-size:12px;color:#b0a090;font-weight:bold;margin-bottom:6px;">Accomplishments</div>
-          <div style="font-size:11px;color:#777;font-style:italic;">None yet</div>
+    <div class="modal-panel" style="width:240px;">
+      <div class="modal-titlebar"><span class="modal-title">${name}</span></div>
+      <div class="modal-body" style="padding:14px 16px 10px;text-align:center;">
+        <canvas id="player-info-sprite" width="120" height="120"
+          style="display:block;margin:0 auto 10px;image-rendering:pixelated;"></canvas>
+        <div style="font-size:11px;color:#8a9bb5;margin-bottom:10px;">${gender}</div>
+        <div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:8px;">
+          <div style="font-size:11px;color:#8a9bb5;margin-bottom:4px;">Accomplishments</div>
+          <div style="font-size:11px;color:#5a6a7a;font-style:italic;">None yet</div>
         </div>
       </div>
       <div class="modal-buttons" style="margin-bottom:8px;">
@@ -2035,7 +2054,11 @@ function showPlayerInfoModal(rp) {
   `;
   document.body.appendChild(overlay);
 
-  const close = () => { overlay.remove(); };
+  // Render sprite async (retries until hair/face loaded)
+  const spriteCanvas = overlay.querySelector("#player-info-sprite");
+  renderRemotePlayerSprite(rp, spriteCanvas);
+
+  const close = () => { overlay.remove(); window.removeEventListener("keydown", onKey); };
   overlay.querySelector("#player-info-close").addEventListener("click", (e) => {
     e.stopPropagation();
     playUISound("BtMouseClick");
@@ -2044,8 +2067,7 @@ function showPlayerInfoModal(rp) {
   overlay.addEventListener("pointerdown", (e) => {
     if (e.target === overlay) close();
   });
-  // Escape to close
-  const onKey = (e) => { if (e.key === "Escape") { close(); window.removeEventListener("keydown", onKey); } };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
   window.addEventListener("keydown", onKey);
 }
 
