@@ -807,6 +807,7 @@ export function handleClientMessage(
       const JQ_TREASURE_CHESTS: Record<string, { npcId: string; questName: string }> = {
         "103000902": { npcId: "1052008", questName: "Shumi's Lost Coin" },
         "103000905": { npcId: "1052009", questName: "Shumi's Lost Bundle of Money" },
+        "103000909": { npcId: "1052010", questName: "Shumi's Lost Sack of Money" },
       };
 
       const jqInfo = JQ_TREASURE_CHESTS[client.mapId];
