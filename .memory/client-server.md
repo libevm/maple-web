@@ -508,8 +508,11 @@ Manually curated files (`resourcesv2/mob/`, `resourcesv2/sound/`) remain tracked
 - **600ms global cooldown** between hits on the same reactor (shared across all players).
 - **10s respawn** after destruction (REACTOR_RESPAWN_MS=10000).
 - **Server-computed loot drops** via `rollReactorLoot()`:
-  - 49% ETC items, 25% USE items, 15% equipment, 10% chairs, 1% cash items
-  - Random item selected from pool per category
+  - 50% ETC, 25% USE, 19% equipment, 5% chairs, 2% cash
+  - Pools loaded dynamically from WZ at startup via `loadDropPools(resourceBase)`
+  - Equipment: `Character.wz/{Cap,Coat,Longcoat,Pants,Shoes,Glove,Shield,Cape,Weapon}/` (4374 items)
+  - USE: `Item.wz/Consume/` (2291), ETC: `Item.wz/Etc/` (2360), Chairs: `Item.wz/Install/` (294), Cash: `Item.wz/Cash/` (484)
+  - Random item selected from chosen category's full WZ pool
 - Server broadcasts `reactor_hit`/`reactor_destroy`/`reactor_respawn` to all room clients.
 - `map_state` includes `reactors[]` array for late-joining clients.
 - Client `performAttack()` finds reactors in range via `findReactorsInRange()`, sends `hit_reactor`.

@@ -190,6 +190,9 @@ composition using `composeCharacterPlacements()`:
    (Face-expression keys are required so hit/pain face overrides recompose immediately.)
    If a face part is expected but its image is not decoded yet, template creation returns `null`
    (no cache write) so draw falls back to last complete frame instead of caching a no-face template.
+   Same guard applies to `equip:*` parts — if any expected equip sprite is still decoding,
+   template is NOT cached. This prevents equipment "blinking" after equipping new items
+   (incomplete template cached → equip missing → cache hit on next frame → blink cycle).
 
 **Climbing Parity** (C++ `CharLook::draw` climbing branch):
 - Weapon: hidden during climbing (`getEquipFrameParts` returns `[]` when `CLIMBING_STANCES` has action and equip has no stance)
