@@ -6799,8 +6799,12 @@ function updateReactorAnimations(dt) {
 
     // Hit animation playback
     if (rs.hitAnimPlaying) {
-      const stateData = anim.states[rs.state] ?? anim.states[rs.state - 1];
-      const hitFrames = stateData?.hit ?? [];
+      // Find hit frames: check current state, then search backwards for one with hit anim
+      let hitFrames = [];
+      for (let s = rs.state; s >= 0; s--) {
+        const sd = anim.states[s] ?? anim.states[s - 1];
+        if (sd?.hit?.length > 0) { hitFrames = sd.hit; break; }
+      }
       if (hitFrames.length > 0) {
         const frame = hitFrames[rs.hitAnimFrameIndex];
         if (frame) {
@@ -6856,14 +6860,21 @@ function drawReactors() {
     // Pick the right frame to draw
     let frame = null;
     if (rs.hitAnimPlaying) {
-      const stateData = anim.states[rs.state] ?? anim.states[rs.state - 1];
-      const hitFrames = stateData?.hit ?? [];
+      // Search backwards for a state with hit animation frames
+      let hitFrames = [];
+      for (let s = rs.state; s >= 0; s--) {
+        const sd = anim.states[s] ?? anim.states[s - 1];
+        if (sd?.hit?.length > 0) { hitFrames = sd.hit; break; }
+      }
       frame = hitFrames[rs.hitAnimFrameIndex] ?? hitFrames[0];
     }
     if (!frame) {
-      // Use idle frame for current state (fall back to state 0)
-      const stateData = anim.states[rs.state] ?? anim.states[0];
-      const idleFrames = stateData?.idle ?? [];
+      // Use idle frame for current state; fall back through earlier states until one has frames
+      let idleFrames = [];
+      for (let s = rs.state; s >= 0; s--) {
+        const sd = anim.states[s];
+        if (sd?.idle?.length > 0) { idleFrames = sd.idle; break; }
+      }
       frame = idleFrames[rs.frameIndex % (idleFrames.length || 1)] ?? idleFrames[0];
     }
     if (!frame) continue;

@@ -17,7 +17,7 @@ const REACTOR_MAX_HP = 4;
 const REACTOR_HIT_COOLDOWN_MS = 600;
 
 /** Respawn delay after destruction (ms) */
-const REACTOR_RESPAWN_MS = 30_000;
+const REACTOR_RESPAWN_MS = 10_000;
 
 /** Maximum distance (px) a player can be from a reactor to hit it */
 const REACTOR_HIT_RANGE_X = 120;
