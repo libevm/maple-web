@@ -6915,13 +6915,8 @@ function drawReactors() {
     const img = getImageByKey(frame.key);
     if (!img) continue;
 
-    // C++ draw shift: shift = (0, normal.get_origin().y()) where normal = state 0 idle
-    // This makes the sprite bottom align with the foothold position.
-    const state0Idle = anim.states[0]?.idle?.[0];
-    const normalOriginY = state0Idle?.originY ?? 0;
-
     const screenX = Math.round(reactor.x - cam.x + halfW);
-    const screenY = Math.round(reactor.y - cam.y + halfH - normalOriginY);
+    const screenY = Math.round(reactor.y - cam.y + halfH);
 
     if (
       screenX + img.width < -100 || screenX - img.width > canvasEl.width + 100 ||
