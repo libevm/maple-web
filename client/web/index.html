@@ -13,6 +13,18 @@
     </script>
   </head>
   <body>
+    <!-- Logout Confirmation Modal -->
+    <div id="logout-confirm-overlay" class="logout-confirm-overlay hidden">
+      <div class="logout-confirm-panel">
+        <div class="logout-confirm-icon">⚠</div>
+        <div class="logout-confirm-text">Are you sure you want to log out?<br>This will delete your character save.</div>
+        <div class="logout-confirm-buttons">
+          <button id="logout-confirm-yes" class="logout-confirm-yes">Yes, Log Out</button>
+          <button id="logout-confirm-no" class="logout-confirm-no">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Character Creation Overlay -->
     <div id="character-create-overlay" class="character-create-overlay hidden">
       <div class="character-create-panel">
@@ -82,13 +94,6 @@
           <div class="settings-group">
             <div class="settings-group-label">Account</div>
             <button id="settings-logout-btn" class="settings-logout-btn">Log Out</button>
-          </div>
-          <div id="logout-confirm" class="logout-confirm hidden">
-            <span>⚠ Are you sure? This will delete your character save.</span>
-            <div class="logout-confirm-buttons">
-              <button id="logout-confirm-yes" class="logout-confirm-yes">Yes, Log Out</button>
-              <button id="logout-confirm-no" class="logout-confirm-no">Cancel</button>
-            </div>
           </div>
 
         </div>
