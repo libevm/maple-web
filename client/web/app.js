@@ -5496,8 +5496,9 @@ const NPC_SCRIPTS = {
         { label: "Breath of Lava", mapId: 280020000 },
       ] },
   ]},
-  // Jump quest treasure chest (map 103000902 — Shumi's Lost Coin)
+  // Jump quest treasure chests
   subway_get1: { greeting: "Congratulations! You've made it through the construction site! Open the chest to claim your reward.", jqReward: true },
+  subway_get2: { greeting: "Incredible! You've conquered the deeper levels of the construction site! Open the chest to claim your reward.", jqReward: true },
   // Jump quest exit NPCs
   subway_out: { greeting: "Had enough? I can send you back if you'd like.", destinations: [{ label: "Back to Mushroom Park", mapId: 100000001 }] },
   flower_out: { greeting: "This obstacle course is no joke. Need a way out?", destinations: [{ label: "Back to Mushroom Park", mapId: 100000001 }] },

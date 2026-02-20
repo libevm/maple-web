@@ -806,6 +806,7 @@ export function handleClientMessage(
       // Jump quest treasure chest — server rolls a reward and warps player home
       const JQ_TREASURE_CHESTS: Record<string, { npcId: string; questName: string }> = {
         "103000902": { npcId: "1052008", questName: "Shumi's Lost Coin" },
+        "103000905": { npcId: "1052009", questName: "Shumi's Lost Bundle of Money" },
       };
 
       const jqInfo = JQ_TREASURE_CHESTS[client.mapId];
