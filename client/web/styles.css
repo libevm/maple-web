@@ -622,6 +622,35 @@ button {
   font-size: 11px;
 }
 
+/* ── Pickup Journal (right-aligned above chat bar) ── */
+.pickup-journal {
+  position: absolute;
+  bottom: 34px;
+  right: 10px;
+  z-index: 16;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  pointer-events: none;
+  max-width: 280px;
+}
+
+.pickup-journal-entry {
+  font-size: 11px;
+  font-family: "Dotum", "Arial", sans-serif;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+  padding: 1px 0;
+  opacity: 1;
+  transition: opacity 1s ease-out;
+}
+
+.pickup-journal-entry.fading {
+  opacity: 0;
+}
+
 /* ── Chat log (history overlay — floats above chat bar, doesn't affect canvas size) ── */
 .chat-log {
   position: absolute;

@@ -12,6 +12,7 @@ const chatInputEl = document.getElementById("chat-input");
 const chatLogEl = document.getElementById("chat-log");
 const chatLogMessagesEl = document.getElementById("chat-log-messages");
 const chatLogHandleEl = document.getElementById("chat-log-handle");
+const pickupJournalEl = document.getElementById("pickup-journal");
 const debugOverlayToggleEl = document.getElementById("debug-overlay-toggle");
 const debugRopesToggleEl = document.getElementById("debug-ropes-toggle");
 const debugFootholdsToggleEl = document.getElementById("debug-footholds-toggle");
@@ -2734,8 +2735,28 @@ function lootDropLocally(drop) {
   // Eagerly load WZ info for slotMax cache (for future stacking)
   if (stackable) loadItemWzInfo(drop.id);
 
+  addPickupJournalEntry(drop.name, drop.qty);
   playUISound("PickUpItem");
   refreshUIWindows();
+}
+
+const PICKUP_JOURNAL_FADE_MS = 5000; // entries start fading after 5s
+const PICKUP_JOURNAL_FADE_DURATION = 1000; // 1s CSS transition
+
+/** Add a "You picked up..." entry to the pickup journal. */
+function addPickupJournalEntry(itemName, qty) {
+  if (!pickupJournalEl) return;
+  const el = document.createElement("div");
+  el.className = "pickup-journal-entry";
+  const qtyText = qty > 1 ? `${qty} ` : "";
+  el.textContent = `You picked up ${qtyText}${itemName}`;
+  pickupJournalEl.appendChild(el);
+
+  // After 5s, start fade-out; after fade completes, remove element
+  setTimeout(() => {
+    el.classList.add("fading");
+    setTimeout(() => el.remove(), PICKUP_JOURNAL_FADE_DURATION);
+  }, PICKUP_JOURNAL_FADE_MS);
 }
 
 /** Start pickup animation on a drop, flying toward the looter. */
