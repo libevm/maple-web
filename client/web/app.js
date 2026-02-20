@@ -1562,7 +1562,7 @@ function handleServerMessage(msg) {
       for (const p of msg.players || []) {
         const rp = createRemotePlayer(p.id, p.name, p.look, p.x, p.y, p.action, p.facing);
         rp.chairId = p.chair_id || 0;
-        rp.achievements = p.achievements || {};
+        rp.achievements = (p.achievements && typeof p.achievements === "object" && !Array.isArray(p.achievements)) ? p.achievements : {};
         if (rp.chairId) loadChairSprite(rp.chairId);
         remotePlayers.set(p.id, rp);
         loadRemotePlayerEquipData(rp);
@@ -1584,7 +1584,7 @@ function handleServerMessage(msg) {
       if (!remotePlayers.has(msg.id)) {
         const rp = createRemotePlayer(msg.id, msg.name, msg.look, msg.x, msg.y, msg.action, msg.facing);
         rp.chairId = msg.chair_id || 0;
-        rp.achievements = msg.achievements || {};
+        rp.achievements = (msg.achievements && typeof msg.achievements === "object" && !Array.isArray(msg.achievements)) ? msg.achievements : {};
         if (rp.chairId) loadChairSprite(rp.chairId);
         remotePlayers.set(msg.id, rp);
         loadRemotePlayerEquipData(rp);
@@ -2546,7 +2546,7 @@ function showPlayerInfoModal(rp) {
   // Populate achievements
   const achDiv = overlay.querySelector("#player-info-achievements");
   const achs = rp.achievements || {};
-  const achEntries = Object.entries(achs).filter(([, v]) => v > 0);
+  const achEntries = Object.entries(achs).filter(([, v]) => typeof v === "number" && v > 0);
   if (achEntries.length === 0) {
     achDiv.innerHTML = `<div style="color:#5a6a7a;font-style:italic;">None yet</div>`;
   } else {
