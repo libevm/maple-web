@@ -1694,29 +1694,36 @@ function handleServerMessage(msg) {
     // ── Server-authoritative reactor system ──
 
     case "reactor_hit": {
-      // Server confirmed a reactor hit — update client state and play hit animation
+      // C++ set_state(): plays src[this->state]["hit"] BEFORE advancing state.
+      // So we play hit anim for the pre-hit state, then update.
       const rIdx = msg.reactor_idx;
       const rState = reactorRuntimeState.get(rIdx);
       if (rState) {
+        rState.hitAnimState = rState.state; // animation uses pre-hit state
         rState.state = msg.new_state;
         rState.hp = msg.new_hp;
         rState.hitAnimPlaying = true;
         rState.hitAnimFrameIndex = 0;
         rState.hitAnimElapsed = 0;
+        playUISound("ReactorHit");
       }
       break;
     }
 
     case "reactor_destroy": {
-      // Server says reactor is destroyed — play final hit anim, then deactivate
+      // C++ destroy(): plays src[this->state]["hit"], then state++, dead=true.
+      // Play current state's hit anim (the break-apart animation).
       const rIdx = msg.reactor_idx;
       const rState = reactorRuntimeState.get(rIdx);
       if (rState) {
+        rState.hitAnimState = rState.state; // animation uses current state
         rState.active = false;
+        rState.state += 1; // C++: state++ after setting up animation
         rState.hitAnimPlaying = true;
         rState.hitAnimFrameIndex = 0;
         rState.hitAnimElapsed = 0;
         rState.destroyed = true;
+        playUISound("ReactorBreak");
       }
       break;
     }
@@ -3554,6 +3561,21 @@ async function preloadUISounds() {
         _uiSoundCache[name] = `data:audio/mp3;base64,${node.basedata}`;
       }
     }
+    // Preload reactor hit/break sounds (Reactor.img > 2000 = reactor 0002000)
+    try {
+      const reactorSoundJson = await fetchJson("/resources/Sound.wz/Reactor.img.json");
+      const r2000 = reactorSoundJson?.$$?.find(c => c.$imgdir === "2000");
+      if (r2000) {
+        // State 0 hit sound (normal hit)
+        const s0 = r2000.$$?.find(c => c.$imgdir === "0");
+        const hitNode = s0?.$$?.find(c => c.$sound === "Hit");
+        if (hitNode?.basedata) _uiSoundCache["ReactorHit"] = `data:audio/mp3;base64,${hitNode.basedata}`;
+        // State 3 hit sound (break/destroy)
+        const s3 = r2000.$$?.find(c => c.$imgdir === "3");
+        const breakNode = s3?.$$?.find(c => c.$sound === "Hit");
+        if (breakNode?.basedata) _uiSoundCache["ReactorBreak"] = `data:audio/mp3;base64,${breakNode.basedata}`;
+      }
+    } catch (e) { /* reactor sounds optional */ }
   } catch (e) {
     console.warn("[ui] Failed to preload UI sounds", e);
   }
@@ -6683,7 +6705,7 @@ async function loadReactorAnimation(reactorId) {
                   }
                   hit.push({ key, width: meta.width, height: meta.height,
                     originX: hRec.originX ?? 0, originY: hRec.originY ?? 0,
-                    delay: hRec.delay ?? 120, basedata: meta.basedata });
+                    delay: Math.max(hRec.delay ?? 120, 250), basedata: meta.basedata });
                 }
               }
             }
@@ -6732,6 +6754,7 @@ function syncServerReactors(serverReactors) {
       hp: r.hp,
       active: r.active,
       hitAnimPlaying: false,
+      hitAnimState: 0,
       hitAnimFrameIndex: 0,
       hitAnimElapsed: 0,
       destroyed: !r.active,
@@ -6773,6 +6796,7 @@ function initReactorRuntimeStates() {
       hp: 4,
       active: true,
       hitAnimPlaying: false,
+      hitAnimState: 0,
       hitAnimFrameIndex: 0,
       hitAnimElapsed: 0,
       destroyed: false,
@@ -6801,10 +6825,11 @@ function updateReactorAnimations(dt) {
 
     // Hit animation playback
     if (rs.hitAnimPlaying) {
-      // Find hit frames: check current state, then search backwards for one with hit anim
+      // Use hitAnimState (the pre-hit state) for animation lookup, matching C++ behavior
+      const animState = rs.hitAnimState ?? rs.state;
       let hitFrames = [];
-      for (let s = rs.state; s >= 0; s--) {
-        const sd = anim.states[s] ?? anim.states[s - 1];
+      for (let s = animState; s >= 0; s--) {
+        const sd = anim.states[s];
         if (sd?.hit?.length > 0) { hitFrames = sd.hit; break; }
       }
       if (hitFrames.length > 0) {
@@ -6862,10 +6887,11 @@ function drawReactors() {
     // Pick the right frame to draw
     let frame = null;
     if (rs.hitAnimPlaying) {
-      // Search backwards for a state with hit animation frames
+      // Use hitAnimState (pre-hit state) for animation, matching C++ behavior
+      const animState = rs.hitAnimState ?? rs.state;
       let hitFrames = [];
-      for (let s = rs.state; s >= 0; s--) {
-        const sd = anim.states[s] ?? anim.states[s - 1];
+      for (let s = animState; s >= 0; s--) {
+        const sd = anim.states[s];
         if (sd?.hit?.length > 0) { hitFrames = sd.hit; break; }
       }
       frame = hitFrames[rs.hitAnimFrameIndex] ?? hitFrames[0];

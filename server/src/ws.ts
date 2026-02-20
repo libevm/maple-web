@@ -945,15 +945,15 @@ export function handleClientMessage(
         const reactors = getMapReactors(client.mapId);
         const reactor = reactors[reactorIdx];
         const dropX = reactor.placement.x;
-        const dropY = reactor.placement.y;
+        const groundY = reactor.placement.footholdY;
 
         const drop = roomManager.addDrop(client.mapId, {
           item_id: loot.item_id,
           name: "",    // client resolves name from WZ
           qty: loot.qty,
           x: dropX,
-          startY: dropY - 20, // arc starts slightly above reactor
-          destY: dropY,
+          startY: reactor.placement.y - 20, // arc starts above reactor visual
+          destY: groundY,
           owner_id: "",       // no owner — anyone can loot
           iconKey: "",        // client loads icon from WZ
           category: loot.category,

@@ -600,8 +600,8 @@ describe("WebSocket server", () => {
 
     // map_state should include reactors for map 100000001
     // (already consumed by authAndJoin, but let's verify structure by checking a fresh join)
-    // Move near a reactor (reactor 0 at x=-200, y=274)
-    client.send({ type: "move", x: -200, y: 274, action: "stand1", facing: 1 });
+    // Move near a reactor (reactor 0 at x=-400, y=274 — reactor at y=257, within range)
+    client.send({ type: "move", x: -400, y: 274, action: "stand1", facing: 1 });
     await new Promise(r => setTimeout(r, 50));
 
     // Hit reactor 0

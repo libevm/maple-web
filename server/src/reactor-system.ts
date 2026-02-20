@@ -150,19 +150,20 @@ const CASH_DROPS: number[] = [
 export interface ReactorPlacement {
   reactor_id: string; // WZ reactor ID (e.g. "0002000")
   x: number;
-  y: number;          // ground Y where reactor sits
+  y: number;          // visual Y where reactor origin sits (adjusted for sprite)
+  footholdY: number;  // actual foothold Y for drop landing
 }
 
 /** Map ID → array of reactor placements */
 const MAP_REACTORS: Record<string, ReactorPlacement[]> = {
   "100000001": [
-    // 4 on the grass ground (y=274)
-    { reactor_id: "0002000", x: -200, y: 274 },
-    { reactor_id: "0002000", x: 200,  y: 274 },
-    { reactor_id: "0002000", x: 600,  y: 274 },
-    { reactor_id: "0002000", x: 1000, y: 274 },
-    // 1 next to Maya NPC (x=-17, cy=38, platform y=38)
-    { reactor_id: "0002000", x: 60,   y: 38 },
+    // 4 on the grass ground (foothold y=274, box origin.y=17 so visual y=257)
+    { reactor_id: "0002000", x: -400, y: 257, footholdY: 274 },
+    { reactor_id: "0002000", x: 200,  y: 257, footholdY: 274 },
+    { reactor_id: "0002000", x: 600,  y: 257, footholdY: 274 },
+    { reactor_id: "0002000", x: 1000, y: 257, footholdY: 274 },
+    // 1 next to Maya NPC (platform foothold y=38, origin.y=17 → visual y=21)
+    { reactor_id: "0002000", x: 60,   y: 21, footholdY: 38 },
   ],
 };
 
