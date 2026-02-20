@@ -348,6 +348,73 @@ export function rollReactorLoot(): LootItem {
   return { item_id, qty, category };
 }
 
+// ─── Item Name Lookup ───────────────────────────────────────────────
+
+const _itemNameCache = new Map<number, string>();
+let _itemNamesLoaded = false;
+
+/** Load item names from String.wz. Call once at startup (after loadDropPools). */
+export function loadItemNames(resourceBase: string): void {
+  if (_itemNamesLoaded) return;
+  _itemNamesLoaded = true;
+
+  const fs = require("fs");
+  const path = require("path");
+  const stringDir = path.join(resourceBase, "String.wz");
+
+  // Equip names: Eqp.img.json → Eqp → sub-categories → items
+  try {
+    const json = JSON.parse(fs.readFileSync(path.join(stringDir, "Eqp.img.json"), "utf8"));
+    const eqp = json.$$?.find((c: any) => c.$imgdir === "Eqp");
+    if (eqp) {
+      for (const cat of eqp.$$ ?? []) {
+        for (const item of cat.$$ ?? []) {
+          const id = parseInt(item.$imgdir, 10);
+          const name = item.$$?.find((c: any) => c.$string === "name")?.value;
+          if (!isNaN(id) && name) _itemNameCache.set(id, String(name));
+        }
+      }
+    }
+  } catch {}
+
+  // Consume, Etc, Ins (chairs), Cash items
+  for (const file of ["Consume.img.json", "Etc.img.json", "Ins.img.json", "Cash.img.json"]) {
+    try {
+      const json = JSON.parse(fs.readFileSync(path.join(stringDir, file), "utf8"));
+      for (const item of json.$$ ?? []) {
+        const id = parseInt(item.$imgdir, 10);
+        const name = item.$$?.find((c: any) => c.$string === "name")?.value;
+        if (!isNaN(id) && name) _itemNameCache.set(id, String(name));
+      }
+    } catch {}
+  }
+
+  console.log(`[items] Loaded ${_itemNameCache.size} item names`);
+}
+
+/** Get the name for an item ID, or a fallback string. */
+export function getItemName(itemId: number): string {
+  return _itemNameCache.get(itemId) ?? `Item #${itemId}`;
+}
+
+// ─── JQ Reward Generation ───────────────────────────────────────────
+
+/** Roll a random jump quest reward: 50/50 equipment or cash item, qty always 1. */
+export function rollJqReward(): LootItem {
+  const isEquip = Math.random() < 0.5;
+  if (isEquip && EQUIP_DROPS.length > 0) {
+    const item_id = EQUIP_DROPS[Math.floor(Math.random() * EQUIP_DROPS.length)];
+    return { item_id, qty: 1, category: "EQUIP" };
+  }
+  if (CASH_DROPS.length > 0) {
+    const item_id = CASH_DROPS[Math.floor(Math.random() * CASH_DROPS.length)];
+    return { item_id, qty: 1, category: "CASH" };
+  }
+  // Fallback
+  const pool = EQUIP_DROPS.length > 0 ? EQUIP_DROPS : [4000000];
+  return { item_id: pool[Math.floor(Math.random() * pool.length)], qty: 1, category: pool === EQUIP_DROPS ? "EQUIP" : "ETC" };
+}
+
 /** Reset all reactor states (for testing). */
 export function resetAllReactors(): void {
   _mapReactors.clear();

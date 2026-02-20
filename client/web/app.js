@@ -1944,6 +1944,44 @@ function handleServerMessage(msg) {
 
     // ── Server-authoritative map transitions ──
 
+    case "jq_reward": {
+      // Server awarded a JQ treasure chest reward
+      const questName = msg.quest_name || "Jump Quest";
+      const itemName = msg.item_name || "an item";
+      const itemId = Number(msg.item_id) || 0;
+      const itemQty = Number(msg.item_qty) || 1;
+      const itemCategory = msg.item_category || "EQUIP";
+
+      // Add item to local inventory
+      if (itemId) {
+        const invType = itemCategory === "EQUIP" ? "EQUIP" : "CASH";
+        const maxSlot = playerInventory
+          .filter(it => it.invType === invType)
+          .reduce((max, it) => Math.max(max, it.slot), -1);
+        playerInventory.push({
+          id: itemId,
+          name: itemName,
+          qty: itemQty,
+          invType,
+          slot: maxSlot + 1,
+          category: itemCategory === "EQUIP" ? "Weapon" : null,
+        });
+      }
+
+      // Grey system message in chat
+      const sysMsg = {
+        name: "",
+        text: `You've completed ${questName} and have received ${itemName}!`,
+        timestamp: Date.now(),
+        type: "system",
+      };
+      runtime.chat.history.push(sysMsg);
+      if (runtime.chat.history.length > runtime.chat.maxHistory) runtime.chat.history.shift();
+      appendChatLogMessage(sysMsg);
+      rlog(`[JQ] Reward: ${itemName} (${itemId}) for ${questName}`);
+      break;
+    }
+
     case "change_map": {
       // Server tells us to load a specific map.
       // This fires in response to use_portal, admin_warp, or on initial auth.
@@ -4261,12 +4299,13 @@ function sendChatMessage(text) {
   playSfx("UI", "BtMouseOver");
 }
 
-function addSystemChatMessage(text) {
+function addSystemChatMessage(text, subtype) {
   const msg = {
     name: "",
     text,
     timestamp: Date.now(),
     type: "system",
+    subtype: subtype || null,
   };
 
   runtime.chat.history.push(msg);
@@ -4281,7 +4320,9 @@ function appendChatLogMessage(msg) {
   if (!chatLogMessagesEl) return;
 
   const el = document.createElement("div");
-  el.className = msg.type === "system" ? "chat-msg chat-msg-system" : "chat-msg";
+  el.className = msg.type === "system"
+    ? "chat-msg chat-msg-system" + (msg.subtype === "welcome" ? " chat-msg-welcome" : "")
+    : "chat-msg";
 
   if (msg.type === "system") {
     el.textContent = msg.text;
@@ -5410,6 +5451,8 @@ const NPC_SCRIPTS = {
         { label: "Breath of Lava", mapId: 280020000 },
       ] },
   ]},
+  // Jump quest treasure chest (map 103000902 — Shumi's Lost Coin)
+  subway_get1: { greeting: "Congratulations! You've made it through the construction site! Open the chest to claim your reward.", jqReward: true },
   // Jump quest exit NPCs
   subway_out: { greeting: "Had enough? I can send you back if you'd like.", destinations: [{ label: "Back to Mushroom Park", mapId: 100000001 }] },
   flower_out: { greeting: "This obstacle course is no joke. Need a way out?", destinations: [{ label: "Back to Mushroom Park", mapId: 100000001 }] },
@@ -5456,11 +5499,50 @@ async function runNpcMapTransition(npcId, mapId) {
 }
 
 /**
+ * Request a JQ treasure chest reward from the server.
+ * Server rolls a 50/50 equip/cash item, adds to inventory, increments achievement, warps home.
+ */
+async function requestJqReward() {
+  if (!_wsConnected) {
+    // Offline fallback — just warp home
+    await fadeScreenTo(1, PORTAL_FADE_OUT_MS);
+    runtime.transition.alpha = 0;
+    runtime.transition.active = false;
+    try { await loadMap("100000001", null, false); saveCharacter(); }
+    catch (e) { rlog(`JQ reward offline error: ${e}`); }
+    finally {
+      runtime.portalWarpInProgress = false;
+      runtime.transition.alpha = 1;
+      runtime.transition.active = true;
+      await fadeScreenTo(0, PORTAL_FADE_IN_MS);
+    }
+    return;
+  }
+  // Online — server handles reward + warp
+  wsSend({ type: "jq_reward" });
+  // Response handled in WS message handler (jq_reward → chat msg + change_map follows)
+}
+
+/**
  * Build dialogue lines from an NPC script definition.
  * npcId is the NPC's WZ ID (e.g. "1012000"), sent to server for validation.
  */
 function buildScriptDialogue(scriptDef, npcId) {
   const lines = [];
+  // JQ treasure chest: single greeting + "Open Chest" action
+  if (scriptDef.jqReward) {
+    lines.push({
+      text: scriptDef.greeting,
+      options: [{
+        label: "Open Chest",
+        action: () => {
+          closeNpcDialogue();
+          requestJqReward();
+        },
+      }],
+    });
+    return lines;
+  }
   // Multi-page dialogue: pages[] with text + optional destinations
   if (scriptDef.pages) {
     for (const page of scriptDef.pages) {
@@ -13220,7 +13302,7 @@ async function loadMap(mapId, spawnPortalName = null, spawnFromPortalTransfer = 
       "Time to grind! Or just vibe. Your call.",
       "Ellinia's forests whisper your name.",
     ];
-    addSystemChatMessage(`Welcome — ${_welcomePhrases[Math.floor(Math.random() * _welcomePhrases.length)]}`);
+    addSystemChatMessage(`Welcome — ${_welcomePhrases[Math.floor(Math.random() * _welcomePhrases.length)]}`, "welcome");
     if (runtime.map?.swim) {
       addSystemChatMessage(`[Info] This is a water environment. Use arrow keys or Space to swim when airborne.`);
     }

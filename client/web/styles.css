@@ -729,8 +729,11 @@ button {
 }
 
 .chat-msg-system {
-  color: #fbbf24;
+  color: #9ca3af;
   font-style: italic;
+}
+.chat-msg-system.chat-msg-welcome {
+  color: #fbbf24;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════

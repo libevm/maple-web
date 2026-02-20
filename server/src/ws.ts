@@ -25,6 +25,8 @@ import {
   hitReactor,
   tickReactorRespawns,
   rollReactorLoot,
+  rollJqReward,
+  getItemName,
 } from "./reactor-system.ts";
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -87,6 +89,8 @@ export interface WSClient {
   inventory: InventoryItem[];
   /** Server-tracked stats (updated by client via save_state) */
   stats: PlayerStats;
+  /** Server-tracked achievements (JQ completions, etc.) */
+  achievements: Record<string, number>;
 }
 
 export interface WSClientData {
@@ -484,10 +488,7 @@ function buildServerSave(client: WSClient): object {
       slot: it.slot,
       category: it.category,
     })),
-    achievements: {
-      mobs_killed: 0, maps_visited: [], portals_used: 0, items_looted: 0,
-      max_level_reached: client.stats.level, total_damage_dealt: 0, deaths: 0, play_time_ms: 0,
-    },
+    achievements: { ...client.achievements },
     version: 1,
     saved_at: new Date().toISOString(),
   };
@@ -798,6 +799,62 @@ export function handleClientMessage(
 
       // All checks passed
       roomManager.initiateMapChange(client.id, String(targetMapId), "");
+      break;
+    }
+
+    case "jq_reward": {
+      // Jump quest treasure chest — server rolls a reward and warps player home
+      const JQ_TREASURE_CHESTS: Record<string, { npcId: string; questName: string }> = {
+        "103000902": { npcId: "1052008", questName: "Shumi's Lost Coin" },
+      };
+
+      const jqInfo = JQ_TREASURE_CHESTS[client.mapId];
+      if (!jqInfo) {
+        sendDirect(client, { type: "portal_denied", reason: "No treasure chest on this map" });
+        break;
+      }
+      if (client.pendingMapId) {
+        sendDirect(client, { type: "portal_denied", reason: "Already transitioning" });
+        break;
+      }
+
+      // Roll 50/50 equipment or cash item
+      const reward = rollJqReward();
+      const itemName = getItemName(reward.item_id);
+
+      // Add item to player's inventory
+      const invType = reward.category === "EQUIP" ? "EQUIP" : "CASH";
+      const maxSlot = client.inventory
+        .filter(it => it.inv_type === invType)
+        .reduce((max, it) => Math.max(max, it.slot), -1);
+      client.inventory.push({
+        item_id: reward.item_id,
+        qty: reward.qty,
+        inv_type: invType,
+        slot: maxSlot + 1,
+        category: reward.category === "EQUIP" ? "Weapon" : null, // generic category
+      });
+
+      // Increment achievement
+      const achKey = jqInfo.questName;
+      client.achievements[achKey] = (client.achievements[achKey] || 0) + 1;
+
+      // Persist immediately
+      persistClientState(client, _moduleDb);
+
+      // Send reward info to client
+      sendDirect(client, {
+        type: "jq_reward",
+        quest_name: jqInfo.questName,
+        item_id: reward.item_id,
+        item_name: itemName,
+        item_qty: reward.qty,
+        item_category: reward.category,
+        completions: client.achievements[achKey],
+      });
+
+      // Warp player back to Mushroom Park
+      roomManager.initiateMapChange(client.id, "100000001", "");
       break;
     }
 

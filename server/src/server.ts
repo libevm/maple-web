@@ -554,6 +554,7 @@ export function createServer(
                 jump: savedStats.jump ?? 100,
                 meso: savedStats.meso ?? 0,
               },
+              achievements: charData.achievements ?? {},
             };
 
             data.authenticated = true;
