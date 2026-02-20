@@ -44,14 +44,10 @@ Used by `POST /api/character/save`, `GET /api/character/load`, and localStorage.
     { "item_id": "number", "qty": "number", "inv_type": "string (EQUIP|USE|SETUP|ETC|CASH)", "slot": "number (0-31)", "category": "string | null" }
   ],
   "achievements": {
-    "mobs_killed": "number",
-    "maps_visited": ["string"],
-    "portals_used": "number",
-    "items_looted": "number",
-    "max_level_reached": "number",
-    "total_damage_dealt": "number",
-    "deaths": "number",
-    "play_time_ms": "number"
+    "jq_quests": {
+      "Shumi's Lost Coin": "number (completion count)",
+      "John's Pink Flower Basket": "number (completion count)"
+    }
   },
   "version": 1,
   "saved_at": "ISO 8601 string"
@@ -79,7 +75,7 @@ Used by `POST /api/character/save`, `GET /api/character/load`, and localStorage.
     { "item_id": 4000000, "qty": 8,  "inv_type": "ETC", "slot": 0, "category": null },
     { "item_id": 4000001, "qty": 3,  "inv_type": "ETC", "slot": 1, "category": null }
   ],
-  "achievements": { "mobs_killed": 0, "maps_visited": [], "portals_used": 0, "items_looted": 0, "max_level_reached": 1, "total_damage_dealt": 0, "deaths": 0, "play_time_ms": 0 },
+  "achievements": {},
   "version": 1
 }
 ```
@@ -538,6 +534,14 @@ Sent to ALL players. Looter adds item to inventory; others animate pickup.
 { "type": "drop_expire", "drop_id": 42 }
 ```
 Sent when a drop has been on the ground for 180 seconds. Client fades it out over 2s.
+
+### `jq_proximity` — Server rejects JQ reward (player not on NPC's platform)
+```json
+{ "type": "jq_proximity", "npc_id": "1063000" }
+```
+Sent when player requests `jq_reward` but server-side `isOnSamePlatform()` fails.
+Only applies to `requirePlatform: true` JQ maps (Forest of Patience).
+Client shows a random "come closer" phrase in system chat.
 
 ### `mob_authority` — Mob authority assignment
 ```json

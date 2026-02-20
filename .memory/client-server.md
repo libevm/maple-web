@@ -410,15 +410,15 @@ allClients: Map<sessionId, WSClient>
 
 **John's Pink Flower Basket** (Sleepywood)
 - `105040310` — Deep Forest of Patience Step 1
-- `105040311` — Deep Forest of Patience Step 2
+- `105040311` — Deep Forest of Patience Step 2 (reward: NPC 1063000 `viola_pink`)
 
 **John's Present**
 - `105040312` — Deep Forest of Patience Step 3
-- `105040313` — Deep Forest of Patience Step 4
+- `105040313` — Deep Forest of Patience Step 4 (reward: NPC 1063001 `viola_blue`)
 
 **John's Last Present**
 - `105040314` — Deep Forest of Patience Step 5
-- `105040315` — Deep Forest of Patience Step 6
+- `105040315` — Deep Forest of Patience Step 6 (reward: NPC 1043000 `bush1`)
 
 **The Forest of Patience** (Ellinia)
 - `101000100` — Step 1
@@ -585,18 +585,25 @@ Cap, FaceAcc, EyeAcc, Earrings, Pendant, Cape, Coat, Longcoat, Shield, Glove, Pa
 ## Jump Quest Treasure Chest Reward System
 
 ### Server (`ws.ts` → `jq_reward` handler)
-- `JQ_TREASURE_CHESTS` map: `"103000902"` → `{ npcId: "1052008", questName: "Shumi's Lost Coin" }`
+- `JQ_TREASURE_CHESTS` map: `"103000902"` → `{ npcId: "1052008", questName: "Shumi's Lost Coin", requirePlatform: false }`
+- **Kerning City Subway**: 103000902 (NPC 1052008), 103000905 (NPC 1052009), 103000909 (NPC 1052010)
+- **Forest of Patience**: 105040311 (NPC 1063000 `viola_pink`), 105040313 (NPC 1063001 `viola_blue`), 105040315 (NPC 1043000 `bush1`)
 - Validates player is on the correct map, not already transitioning
+- **Platform proximity check**: `requirePlatform: true` maps call `isOnSamePlatform()` from `map-data.ts`
+  - Finds NPC's foothold, builds connected chain at same Y, checks player is within chain ±50px X and ±60px Y
+  - Rejection sends `jq_proximity` message → client shows random "come closer" phrase
 - `rollJqReward()` (reactor-system.ts): 50/50 equip or cash item, qty 1
-- Adds item to `client.inventory`, increments `client.achievements[questName]`
+- Adds item to `client.inventory`, increments `client.achievements.jq_quests[questName]`
 - Persists immediately via `persistClientState()`
 - Sends `{ type: "jq_reward", quest_name, item_id, item_name, item_qty, item_category, completions }`
 - Then calls `roomManager.initiateMapChange()` → warps player to `100000001`
 
 ### Client (`app.js`)
-- NPC script `subway_get1` (NPC 1052008): greeting + "Open Chest" option → calls `requestJqReward()`
+- NPC scripts: `subway_get1/2/3` → "Open Chest", `viola_pink`/`viola_blue`/`bush1` → "Claim Reward"
+- `requirePlatform` scripts also do client-side Y distance check (>60px → show proximity phrase in NPC dialogue)
 - `requestJqReward()`: online sends `{ type: "jq_reward" }`, offline just warps home
-- WS `jq_reward` handler: adds item to `playerInventory`, shows grey system chat message
+- WS `jq_reward` handler: adds item to `playerInventory`, updates `runtime.player.achievements.jq_quests`, shows grey system chat message
+- WS `jq_proximity` handler: shows random "come closer" phrase in system chat
 - `handleServerMapChange()` handles the subsequent unsolicited `change_map`
 
 ### Item Name Lookup (`reactor-system.ts`)
@@ -605,10 +612,13 @@ Cap, FaceAcc, EyeAcc, Earrings, Pendant, Cape, Coat, Longcoat, Shield, Glove, Pa
 - Called at startup in `dev.ts` alongside `loadDropPools()`
 
 ### Achievements
-- `WSClient.achievements`: `Record<string, number>` — JQ completion counts
+- `WSClient.achievements`: `Record<string, any>` — nested object with `jq_quests` sub-key
+- `client.achievements.jq_quests[questName]`: number (completion count per JQ)
 - Persisted in `buildServerSave()` → `{ ...client.achievements }`
 - Default character template: empty `{}` (db.ts `buildDefaultCharacterSave`)
-- Server is authoritative — client does not send achievements via `save_state`
+- Client tracks locally in `runtime.player.achievements` — synced via `save_state` (merge: take max per key)
+- REST save preserves server-side `jq_quests` (character-api.ts merge logic)
+- Character info modal displays only `jq_quests` entries with count > 0
 
 ### Chat Message Types
 - `type: "system"` — grey text (#9ca3af), italic

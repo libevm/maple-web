@@ -1987,6 +1987,21 @@ function handleServerMessage(msg) {
       break;
     }
 
+    case "jq_proximity": {
+      // Server rejected JQ reward because player isn't on the same platform as the NPC
+      const PROXIMITY_PHRASES = [
+        "Come closer... I can barely see you from way over there!",
+        "Hey! You need to come up here if you want your reward!",
+        "Come closer... the flowers won't bite, I promise!",
+        "You'll have to climb up to me if you want what I have!",
+        "Come closer... I can't reach you from all the way down there!",
+        "Almost there! Just a little closer and the reward is yours!",
+      ];
+      const phrase = PROXIMITY_PHRASES[Math.floor(Math.random() * PROXIMITY_PHRASES.length)];
+      addSystemChatMessage(phrase);
+      break;
+    }
+
     case "change_map": {
       // Server tells us to load a specific map.
       // This fires in response to use_portal, admin_warp, or on initial auth.
@@ -5517,6 +5532,10 @@ const NPC_SCRIPTS = {
   subway_get1: { greeting: "Congratulations! You've made it through the construction site! Open the chest to claim your reward.", jqReward: true },
   subway_get2: { greeting: "Incredible! You've conquered the deeper levels of the construction site! Open the chest to claim your reward.", jqReward: true },
   subway_get3: { greeting: "Amazing! You've braved the deepest depths of the construction site! Open the chest to claim your reward.", jqReward: true },
+  // Forest of Patience JQ reward NPCs
+  viola_pink: { greeting: "Oh! You found me all the way up here! These pink flowers are for John. Please, take this basket as a thank-you for your incredible climb!", jqReward: true, requirePlatform: true },
+  viola_blue: { greeting: "Amazing! You made it through those treacherous vines! John will be so happy. Here — take this present as a reward for your perseverance!", jqReward: true, requirePlatform: true },
+  bush1: { greeting: "You've conquered the deepest depths of the forest! John's last present is yours. You truly are a master of patience!", jqReward: true, requirePlatform: true },
   // Jump quest exit NPCs
   subway_out: { greeting: "Had enough? I can send you back if you'd like.", destinations: [{ label: "Back to Mushroom Park", mapId: 100000001 }] },
   flower_out: { greeting: "This obstacle course is no joke. Need a way out?", destinations: [{ label: "Back to Mushroom Park", mapId: 100000001 }] },
@@ -5591,14 +5610,30 @@ async function requestJqReward() {
  * Build dialogue lines from an NPC script definition.
  * npcId is the NPC's WZ ID (e.g. "1012000"), sent to server for validation.
  */
-function buildScriptDialogue(scriptDef, npcId) {
+function buildScriptDialogue(scriptDef, npcId, npcWorldY) {
   const lines = [];
-  // JQ treasure chest: single greeting + "Open Chest" action
+  // JQ reward NPC: check platform proximity first if required
   if (scriptDef.jqReward) {
+    // Client-side proximity check (server validates authoritatively too)
+    if (scriptDef.requirePlatform && typeof npcWorldY === "number") {
+      const dy = Math.abs(runtime.player.y - npcWorldY);
+      if (dy > 60) {
+        const PROXIMITY_PHRASES = [
+          "Come closer... I can barely see you from way over there!",
+          "Hey! You need to come up here if you want your reward!",
+          "Come closer... the flowers won't bite, I promise!",
+          "You'll have to climb up to me if you want what I have!",
+          "Come closer... I can't reach you from all the way down there!",
+          "Almost there! Just a little closer and the reward is yours!",
+        ];
+        lines.push(PROXIMITY_PHRASES[Math.floor(Math.random() * PROXIMITY_PHRASES.length)]);
+        return lines;
+      }
+    }
     lines.push({
       text: scriptDef.greeting,
       options: [{
-        label: "Open Chest",
+        label: scriptDef.requirePlatform ? "Claim Reward" : "Open Chest",
         action: () => {
           closeNpcDialogue();
           requestJqReward();
@@ -6903,7 +6938,7 @@ function openNpcDialogue(npcResult) {
   let lines;
   if (scriptDef) {
     // Known script — use specific handler
-    lines = buildScriptDialogue(scriptDef, npcWzId);
+    lines = buildScriptDialogue(scriptDef, npcWzId, npcY);
   } else if (anim.scriptId) {
     // Has a script but no explicit handler — show flavor text + travel options
     lines = buildFallbackScriptDialogue(anim.name, npcWzId, anim.dialogue);

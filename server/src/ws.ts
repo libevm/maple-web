@@ -17,6 +17,7 @@ import {
   distance,
   isNpcOnMap,
   isValidNpcDestination,
+  isOnSamePlatform,
   PORTAL_RANGE_PX,
 } from "./map-data.ts";
 import {
@@ -824,11 +825,14 @@ export function handleClientMessage(
     }
 
     case "jq_reward": {
-      // Jump quest treasure chest — server rolls a reward and warps player home
-      const JQ_TREASURE_CHESTS: Record<string, { npcId: string; questName: string }> = {
-        "103000902": { npcId: "1052008", questName: "Shumi's Lost Coin" },
-        "103000905": { npcId: "1052009", questName: "Shumi's Lost Bundle of Money" },
-        "103000909": { npcId: "1052010", questName: "Shumi's Lost Sack of Money" },
+      // Jump quest treasure chest / flower reward — server rolls a reward and warps player home
+      const JQ_TREASURE_CHESTS: Record<string, { npcId: string; questName: string; requirePlatform: boolean }> = {
+        "103000902": { npcId: "1052008", questName: "Shumi's Lost Coin", requirePlatform: false },
+        "103000905": { npcId: "1052009", questName: "Shumi's Lost Bundle of Money", requirePlatform: false },
+        "103000909": { npcId: "1052010", questName: "Shumi's Lost Sack of Money", requirePlatform: false },
+        "105040311": { npcId: "1063000", questName: "John's Pink Flower Basket", requirePlatform: true },
+        "105040313": { npcId: "1063001", questName: "John's Present", requirePlatform: true },
+        "105040315": { npcId: "1043000", questName: "John's Last Present", requirePlatform: true },
       };
 
       const jqInfo = JQ_TREASURE_CHESTS[client.mapId];
@@ -839,6 +843,14 @@ export function handleClientMessage(
       if (client.pendingMapId) {
         sendDirect(client, { type: "portal_denied", reason: "Already transitioning" });
         break;
+      }
+
+      // Platform check — player must be on the same foothold platform as the NPC
+      if (jqInfo.requirePlatform) {
+        if (!isOnSamePlatform(client.mapId, jqInfo.npcId, client.x, client.y)) {
+          sendDirect(client, { type: "jq_proximity", npc_id: jqInfo.npcId });
+          break;
+        }
       }
 
       // Roll 50/50 equipment or cash item

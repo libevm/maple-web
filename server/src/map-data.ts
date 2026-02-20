@@ -26,6 +26,16 @@ export interface NpcLifeEntry {
   id: string;
   x: number;
   cy: number;
+  /** Foothold ID the NPC stands on (-1 if unknown) */
+  fh: number;
+}
+
+export interface FootholdInfo {
+  id: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
 }
 
 export interface MapInfo {
@@ -35,6 +45,7 @@ export interface MapInfo {
 export interface MapData {
   portals: PortalInfo[];
   npcs: NpcLifeEntry[];
+  footholds: FootholdInfo[];
   info: MapInfo;
 }
 
@@ -125,6 +136,9 @@ export const NPC_SCRIPT_DESTINATIONS: Record<string, NpcDestination[]> = {
   flower_out: [{ label: "Leave", mapId: 100000001 }],
   herb_out: [{ label: "Leave", mapId: 100000001 }],
   Zakum06: [{ label: "Leave", mapId: 100000001 }],
+  // Forest of Patience JQ reward NPCs (scripts: viola_pink, viola_blue, bush1)
+  // These use jq_reward handler, not npc_warp — no destinations needed
+  // but listed here so getNpcDestinations returns non-null (NPC has a script)
 };
 
 /**
@@ -224,6 +238,67 @@ export function isValidNpcDestination(npcId: string, targetMapId: number): boole
   return dests.some(d => d.mapId === targetMapId);
 }
 
+/**
+ * Get the NPC life entry for a specific NPC on a specific map.
+ */
+export function getNpcOnMap(mapId: string, npcId: string): NpcLifeEntry | null {
+  const data = getMapData(mapId);
+  if (!data) return null;
+  return data.npcs.find(n => n.id === npcId) ?? null;
+}
+
+/**
+ * Check if a player at (px, py) is on the same platform as an NPC.
+ * "Same platform" means the player's Y is within 60px of the NPC's foothold Y,
+ * and the player's X is within the foothold chain's X range (±50px tolerance).
+ */
+export function isOnSamePlatform(mapId: string, npcId: string, px: number, py: number): boolean {
+  const data = getMapData(mapId);
+  if (!data) return false;
+  const npc = data.npcs.find(n => n.id === npcId);
+  if (!npc || npc.fh < 0) return false;
+
+  // Find the NPC's foothold
+  const npcFh = data.footholds.find(f => f.id === npc.fh);
+  if (!npcFh) return false;
+
+  // Build connected platform: collect all footholds at the same Y level
+  // that form a contiguous chain with the NPC's foothold
+  const platformY = npcFh.y1; // assuming horizontal foothold
+  const horizontalFhs = data.footholds.filter(f => f.y1 === platformY && f.y2 === platformY);
+
+  // Find connected chain from NPC's foothold
+  const chain = new Set<number>();
+  const queue = [npcFh.id];
+  while (queue.length > 0) {
+    const cur = queue.pop()!;
+    if (chain.has(cur)) continue;
+    chain.add(cur);
+    const curFh = horizontalFhs.find(f => f.id === cur);
+    if (!curFh) continue;
+    // Find adjacent footholds that share an endpoint
+    for (const other of horizontalFhs) {
+      if (chain.has(other.id)) continue;
+      if (other.x1 === curFh.x2 || other.x2 === curFh.x1) {
+        queue.push(other.id);
+      }
+    }
+  }
+
+  // Get platform bounds
+  let minX = Infinity, maxX = -Infinity;
+  for (const fhId of chain) {
+    const fh = horizontalFhs.find(f => f.id === fhId);
+    if (!fh) continue;
+    minX = Math.min(minX, fh.x1, fh.x2);
+    maxX = Math.max(maxX, fh.x1, fh.x2);
+  }
+
+  const TOLERANCE_X = 50;
+  const TOLERANCE_Y = 60;
+  return px >= minX - TOLERANCE_X && px <= maxX + TOLERANCE_X && Math.abs(py - platformY) <= TOLERANCE_Y;
+}
+
 export function clearMapDataCache(): void {
   mapDataCache.clear();
   npcScriptCache.clear();
@@ -294,20 +369,45 @@ function parseMapData(mapJson: any): MapData {
     for (const entry of lifeSection.$$) {
       const children: any[] = entry.$$;
       if (!Array.isArray(children)) continue;
-      let type = "", id = "", x = 0, cy = 0;
+      let type = "", id = "", x = 0, cy = 0, fh = -1;
       for (const child of children) {
         if (child.$string === "type") type = String(child.value ?? "");
         else if (child.$string === "id") id = String(child.value ?? "");
         else if (child.$int === "x") x = Number(child.value) || 0;
         else if (child.$int === "cy") cy = Number(child.value) || 0;
+        else if (child.$int === "fh" || child.$short === "fh") fh = Number(child.value) ?? -1;
       }
       if (type === "n" && id) {
-        npcs.push({ id, x, cy });
+        npcs.push({ id, x, cy, fh });
       }
     }
   }
 
-  return { portals, npcs, info: { returnMap } };
+  // ── foothold section ──
+  const fhSection = sections.find((s: any) => s.$imgdir === "foothold");
+  const footholds: FootholdInfo[] = [];
+  if (fhSection?.$$) {
+    for (const layer of fhSection.$$) {
+      if (!layer?.$$) continue;
+      for (const group of layer.$$) {
+        if (!group?.$$) continue;
+        for (const fh of group.$$) {
+          if (!fh?.$$) continue;
+          let x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+          const fhId = Number(fh.$imgdir ?? 0);
+          for (const child of fh.$$) {
+            if (child.$int === "x1") x1 = Number(child.value) || 0;
+            else if (child.$int === "y1") y1 = Number(child.value) || 0;
+            else if (child.$int === "x2") x2 = Number(child.value) || 0;
+            else if (child.$int === "y2") y2 = Number(child.value) || 0;
+          }
+          footholds.push({ id: fhId, x1, y1, x2, y2 });
+        }
+      }
+    }
+  }
+
+  return { portals, npcs, footholds, info: { returnMap } };
 }
 
 // ─── Internal: NPC Script Loading ───────────────────────────────────
