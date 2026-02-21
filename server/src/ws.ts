@@ -507,7 +507,7 @@ export function persistClientState(client: WSClient, db: Database | null): void 
   if (!db) return;
   try {
     const save = buildServerSave(client);
-    saveCharacterData(db, client.id, JSON.stringify(save));
+    saveCharacterData(db, client.name, JSON.stringify(save));
   } catch (e) {
     console.error(`[WS] Failed to persist state for ${client.name}: ${e}`);
   }

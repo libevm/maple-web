@@ -2,10 +2,13 @@
  * SQLite database module for character persistence.
  *
  * Tables:
- * - characters: session_id → JSON character data
- * - names: name → session_id (unique names)
- * - credentials: session_id → password_hash (claimed accounts)
- * - names: case-insensitive name → session_id (first-come-first-serve)
+ * - sessions: session_id → character_name (transient auth tokens)
+ * - characters: name (NOCASE) → JSON character data
+ * - credentials: name (NOCASE) → password_hash (claimed accounts)
+ * - jq_leaderboard: (player_name, quest_name) → completions
+ *
+ * Session IDs are transient auth tokens. Character name is the permanent identifier.
+ * On logout the session is destroyed; on login a new session is created.
  */
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
@@ -51,7 +54,6 @@ function buildDefaultCharacterSave(name: string, gender: boolean): object {
 // ─── Database init ──────────────────────────────────────────────────
 
 export function initDatabase(dbPath: string = "./data/maple.db"): Database {
-  // Ensure directory exists
   if (dbPath !== ":memory:") {
     mkdirSync(dirname(dbPath), { recursive: true });
   }
@@ -60,37 +62,35 @@ export function initDatabase(dbPath: string = "./data/maple.db"): Database {
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA busy_timeout = 5000");
 
+  // ── Sessions: transient auth tokens → character name ──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      session_id TEXT PRIMARY KEY,
+      character_name TEXT NOT NULL COLLATE NOCASE,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  // ── Characters: keyed by name (permanent identifier) ──
   db.exec(`
     CREATE TABLE IF NOT EXISTS characters (
-      session_id TEXT PRIMARY KEY,
+      name TEXT PRIMARY KEY COLLATE NOCASE,
       data TEXT NOT NULL,
       version INTEGER DEFAULT 1,
       updated_at TEXT DEFAULT (datetime('now'))
     )
   `);
 
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS names (
-      name TEXT PRIMARY KEY COLLATE NOCASE,
-      session_id TEXT NOT NULL UNIQUE,
-      created_at TEXT DEFAULT (datetime('now'))
-    )
-  `);
-
+  // ── Credentials: keyed by name ──
   db.exec(`
     CREATE TABLE IF NOT EXISTS credentials (
-      session_id TEXT PRIMARY KEY,
+      name TEXT PRIMARY KEY COLLATE NOCASE,
       password_hash TEXT NOT NULL,
       claimed_at TEXT DEFAULT (datetime('now'))
     )
   `);
 
-  // Migrate: drop old session_id-keyed leaderboard if it exists
-  const oldCols = db.prepare("PRAGMA table_info(jq_leaderboard)").all() as Array<{ name: string }>;
-  if (oldCols.some(c => c.name === "session_id")) {
-    db.exec("DROP TABLE jq_leaderboard");
-  }
-
+  // ── JQ Leaderboard ──
   db.exec(`
     CREATE TABLE IF NOT EXISTS jq_leaderboard (
       player_name TEXT NOT NULL COLLATE NOCASE,
@@ -101,33 +101,122 @@ export function initDatabase(dbPath: string = "./data/maple.db"): Database {
     )
   `);
 
-  // Index for fast leaderboard queries per quest
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_jq_leaderboard_quest
     ON jq_leaderboard (quest_name, completions DESC)
   `);
 
+  // ── Migration: old session_id-keyed schema → name-keyed schema ──
+  migrateToNameKeyed(db);
+
   return db;
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────
+function migrateToNameKeyed(db: Database): void {
+  // Check if old 'names' table exists (indicator of old schema)
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>;
+  const hasNamesTable = tables.some(t => t.name === "names");
+  if (!hasNamesTable) return;
 
-export function saveCharacterData(db: Database, sessionId: string, data: string): void {
-  // UPDATE only — new characters must go through createDefaultCharacter + reserveName
-  db.prepare(
-    "UPDATE characters SET data = ?, version = 1, updated_at = datetime('now') WHERE session_id = ?"
-  ).run(data, sessionId);
+  // Check if old characters table uses session_id as PK
+  const charCols = db.prepare("PRAGMA table_info(characters)").all() as Array<{ name: string; pk: number }>;
+  const oldSchema = charCols.some(c => c.name === "session_id" && c.pk === 1);
+  if (!oldSchema) {
+    // Already migrated or fresh — just drop names table
+    db.exec("DROP TABLE IF EXISTS names");
+    return;
+  }
+
+  // Migrate data: old characters (session_id PK) → new characters (name PK)
+  const oldNames = db.prepare("SELECT name, session_id FROM names").all() as Array<{ name: string; session_id: string }>;
+
+  // Create temp new table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS characters_new (
+      name TEXT PRIMARY KEY COLLATE NOCASE,
+      data TEXT NOT NULL,
+      version INTEGER DEFAULT 1,
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS credentials_new (
+      name TEXT PRIMARY KEY COLLATE NOCASE,
+      password_hash TEXT NOT NULL,
+      claimed_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  for (const row of oldNames) {
+    // Migrate character data
+    const charRow = db.prepare("SELECT data, version, updated_at FROM characters WHERE session_id = ?").get(row.session_id) as { data: string; version: number; updated_at: string } | null;
+    if (charRow) {
+      db.prepare("INSERT OR IGNORE INTO characters_new (name, data, version, updated_at) VALUES (?, ?, ?, ?)").run(row.name, charRow.data, charRow.version, charRow.updated_at);
+    }
+
+    // Migrate credentials
+    const credRow = db.prepare("SELECT password_hash, claimed_at FROM credentials WHERE session_id = ?").get(row.session_id) as { password_hash: string; claimed_at: string } | null;
+    if (credRow) {
+      db.prepare("INSERT OR IGNORE INTO credentials_new (name, password_hash, claimed_at) VALUES (?, ?, ?)").run(row.name, credRow.password_hash, credRow.claimed_at);
+    }
+
+    // Create a session mapping so existing clients can still connect
+    db.prepare("INSERT OR IGNORE INTO sessions (session_id, character_name) VALUES (?, ?)").run(row.session_id, row.name);
+  }
+
+  // Swap tables
+  db.exec("DROP TABLE characters");
+  db.exec("ALTER TABLE characters_new RENAME TO characters");
+  db.exec("DROP TABLE credentials");
+  db.exec("ALTER TABLE credentials_new RENAME TO credentials");
+  db.exec("DROP TABLE names");
 }
 
-/** Insert or replace a character row. Only called from createDefaultCharacter. */
-export function insertCharacterData(db: Database, sessionId: string, data: string): void {
-  db.prepare(
-    "INSERT OR REPLACE INTO characters (session_id, data, version, updated_at) VALUES (?, ?, 1, datetime('now'))"
-  ).run(sessionId, data);
+// ─── Session helpers ────────────────────────────────────────────────
+
+/** Resolve a session_id to a character name. Returns null if session doesn't exist. */
+export function resolveSession(db: Database, sessionId: string): string | null {
+  const row = db.prepare("SELECT character_name FROM sessions WHERE session_id = ?").get(sessionId) as { character_name: string } | null;
+  return row?.character_name ?? null;
 }
 
-export function loadCharacterData(db: Database, sessionId: string): object | null {
-  const row = db.prepare("SELECT data FROM characters WHERE session_id = ?").get(sessionId) as { data: string } | null;
+/** Create a new session for a character. Returns the session_id. */
+export function createSession(db: Database, sessionId: string, characterName: string): void {
+  // Delete any existing session for this session_id
+  db.prepare("DELETE FROM sessions WHERE session_id = ?").run(sessionId);
+  db.prepare("INSERT INTO sessions (session_id, character_name) VALUES (?, ?)").run(sessionId, characterName);
+}
+
+/** Delete a session (logout). */
+export function deleteSession(db: Database, sessionId: string): void {
+  db.prepare("DELETE FROM sessions WHERE session_id = ?").run(sessionId);
+}
+
+/** Check if a character name is online (has any active WS connection via roomManager). */
+function isCharacterOnline(name: string, roomManager?: { getClient(id: string): unknown }, db?: Database): boolean {
+  if (!roomManager || !db) return false;
+  // Find all sessions for this character name
+  const sessions = db.prepare("SELECT session_id FROM sessions WHERE character_name COLLATE NOCASE = ?").all(name) as Array<{ session_id: string }>;
+  return sessions.some(s => !!roomManager.getClient(s.session_id));
+}
+
+// ─── Character CRUD ─────────────────────────────────────────────────
+
+export function saveCharacterData(db: Database, name: string, data: string): void {
+  db.prepare(
+    "UPDATE characters SET data = ?, version = 1, updated_at = datetime('now') WHERE name COLLATE NOCASE = ?"
+  ).run(data, name);
+}
+
+export function insertCharacterData(db: Database, name: string, data: string): void {
+  db.prepare(
+    "INSERT OR REPLACE INTO characters (name, data, version, updated_at) VALUES (?, ?, 1, datetime('now'))"
+  ).run(name, data);
+}
+
+export function loadCharacterData(db: Database, name: string): object | null {
+  const row = db.prepare("SELECT data FROM characters WHERE name COLLATE NOCASE = ?").get(name) as { data: string } | null;
   if (!row) return null;
   try {
     return JSON.parse(row.data);
@@ -136,81 +225,54 @@ export function loadCharacterData(db: Database, sessionId: string): object | nul
   }
 }
 
-export function reserveName(
-  db: Database,
-  sessionId: string,
-  name: string
-): { ok: true } | { ok: false; reason: string } {
-  const trimmed = name.trim();
-  if (trimmed.length < 2 || trimmed.length > 12) {
-    return { ok: false, reason: "invalid_name" };
-  }
-
-  const existing = db.prepare("SELECT session_id FROM names WHERE name COLLATE NOCASE = ?").get(trimmed) as { session_id: string } | null;
-  if (existing) {
-    if (existing.session_id === sessionId) {
-      return { ok: true }; // re-reserving own name
-    }
-    return { ok: false, reason: "name_taken" };
-  }
-
-  // Delete any previous name this session had
-  db.prepare("DELETE FROM names WHERE session_id = ?").run(sessionId);
-  db.prepare("INSERT INTO names (name, session_id) VALUES (?, ?)").run(trimmed, sessionId);
-  return { ok: true };
+/** Check if a character name already exists. */
+export function characterExists(db: Database, name: string): boolean {
+  const row = db.prepare("SELECT 1 FROM characters WHERE name COLLATE NOCASE = ?").get(name);
+  return !!row;
 }
 
-/**
- * Release a name if the holder is unclaimed (no password) AND offline (no active WS).
- * Deletes the name reservation + character data for the old session.
- * Returns true if the name was freed, false if it's still protected.
- */
-export function releaseUnclaimedName(
-  db: Database,
-  name: string,
-  roomManager?: { getClient(id: string): unknown },
-): boolean {
-  const nameRow = db.prepare("SELECT session_id FROM names WHERE name COLLATE NOCASE = ?").get(name) as { session_id: string } | null;
-  if (!nameRow) return false; // name doesn't exist
-
-  const holderId = nameRow.session_id;
-
-  // Check if the holder has claimed their account (has a password)
-  const claimed = db.prepare("SELECT 1 FROM credentials WHERE session_id = ?").get(holderId);
-  if (claimed) return false; // claimed accounts are permanently protected
-
-  // Check if the holder is currently online
-  if (roomManager && roomManager.getClient(holderId)) return false; // online — can't take
-
-  // Unclaimed + offline → release the name + delete their character data
-  db.prepare("DELETE FROM names WHERE session_id = ?").run(holderId);
-  db.prepare("DELETE FROM characters WHERE session_id = ?").run(holderId);
-  return true;
-}
-
-export function getNameBySession(db: Database, sessionId: string): string | null {
-  const row = db.prepare("SELECT name FROM names WHERE session_id = ?").get(sessionId) as { name: string } | null;
-  return row?.name ?? null;
-}
-
+/** Create a new character with default equipment/stats. */
 export function createDefaultCharacter(
   db: Database,
   sessionId: string,
   name: string,
-  gender: boolean
+  gender: boolean,
 ): object {
   const save = buildDefaultCharacterSave(name, gender);
-  insertCharacterData(db, sessionId, JSON.stringify(save));
-  reserveName(db, sessionId, name);
+  insertCharacterData(db, name, JSON.stringify(save));
+  createSession(db, sessionId, name);
   return save;
+}
+
+// ─── Name availability ──────────────────────────────────────────────
+
+/**
+ * Check if a name is available for a new character.
+ * A name is taken if a character with that name exists.
+ * If the character is unclaimed (no password) and offline, it can be reclaimed.
+ */
+export function isNameAvailable(
+  db: Database,
+  name: string,
+  roomManager?: { getClient(id: string): unknown },
+): boolean {
+  if (!characterExists(db, name)) return true;
+
+  // Character exists — check if it's claimable (unclaimed + offline)
+  const isClaimed = isAccountClaimed(db, name);
+  if (isClaimed) return false;
+
+  const online = isCharacterOnline(name, roomManager, db);
+  if (online) return false;
+
+  // Unclaimed + offline → release the character
+  db.prepare("DELETE FROM characters WHERE name COLLATE NOCASE = ?").run(name);
+  db.prepare("DELETE FROM sessions WHERE character_name COLLATE NOCASE = ?").run(name);
+  return true;
 }
 
 // ─── JQ Leaderboard ─────────────────────────────────────────────────
 
-/**
- * Increment a player's JQ leaderboard entry by name.
- * Upserts: creates row if first completion, otherwise increments.
- */
 export function incrementJqLeaderboard(db: Database, playerName: string, questName: string): void {
   db.prepare(`
     INSERT INTO jq_leaderboard (player_name, quest_name, completions, best_at)
@@ -220,10 +282,6 @@ export function incrementJqLeaderboard(db: Database, playerName: string, questNa
   `).run(playerName, questName);
 }
 
-/**
- * Get the leaderboard for a specific quest.
- * Returns top N players sorted by completions descending.
- */
 export function getJqLeaderboard(
   db: Database,
   questName: string,
@@ -238,10 +296,6 @@ export function getJqLeaderboard(
   `).all(questName, limit) as Array<{ name: string; completions: number }>;
 }
 
-/**
- * Get all leaderboard entries (all quests), top N per quest.
- * Returns a map of quest_name → [{name, completions}].
- */
 export function getAllJqLeaderboards(
   db: Database,
   limitPerQuest: number = 50,
@@ -264,24 +318,24 @@ export function getAllJqLeaderboards(
 
 // ─── Account claim / login ──────────────────────────────────────────
 
-export function isAccountClaimed(db: Database, sessionId: string): boolean {
-  const row = db.prepare("SELECT 1 FROM credentials WHERE session_id = ?").get(sessionId);
+export function isAccountClaimed(db: Database, name: string): boolean {
+  const row = db.prepare("SELECT 1 FROM credentials WHERE name COLLATE NOCASE = ?").get(name);
   return !!row;
 }
 
 export async function claimAccount(
   db: Database,
-  sessionId: string,
+  name: string,
   password: string,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   if (!password || password.length < 4) {
     return { ok: false, reason: "password_too_short" };
   }
-  if (isAccountClaimed(db, sessionId)) {
+  if (isAccountClaimed(db, name)) {
     return { ok: false, reason: "already_claimed" };
   }
   const hash = await Bun.password.hash(password, "bcrypt");
-  db.prepare("INSERT INTO credentials (session_id, password_hash) VALUES (?, ?)").run(sessionId, hash);
+  db.prepare("INSERT INTO credentials (name, password_hash) VALUES (?, ?)").run(name, hash);
   return { ok: true };
 }
 
@@ -290,11 +344,12 @@ export async function loginAccount(
   name: string,
   password: string,
 ): Promise<{ ok: true; session_id: string } | { ok: false; reason: string }> {
-  const nameRow = db.prepare("SELECT session_id FROM names WHERE name COLLATE NOCASE = ?").get(name) as { session_id: string } | null;
-  if (!nameRow) {
+  // Check character exists
+  if (!characterExists(db, name)) {
     return { ok: false, reason: "invalid_credentials" };
   }
-  const credRow = db.prepare("SELECT password_hash FROM credentials WHERE session_id = ?").get(nameRow.session_id) as { password_hash: string } | null;
+  // Check credentials
+  const credRow = db.prepare("SELECT password_hash FROM credentials WHERE name COLLATE NOCASE = ?").get(name) as { password_hash: string } | null;
   if (!credRow) {
     return { ok: false, reason: "not_claimed" };
   }
@@ -302,5 +357,8 @@ export async function loginAccount(
   if (!valid) {
     return { ok: false, reason: "invalid_credentials" };
   }
-  return { ok: true, session_id: nameRow.session_id };
+  // Generate a new session_id for this login
+  const newSessionId = crypto.randomUUID();
+  createSession(db, newSessionId, name);
+  return { ok: true, session_id: newSessionId };
 }

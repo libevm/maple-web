@@ -5,21 +5,25 @@
  * - POST /api/character/create  → create character with name + gender
  * - GET  /api/character/load    → load character data
  * - POST /api/character/save    → save character data
- * - POST /api/character/name    → reserve a name
+ * - POST /api/character/claim   → set password on character
+ * - GET  /api/character/claimed → check if character has a password
+ * - POST /api/character/login   → login with name + password → new session
+ *
+ * Session IDs are transient auth tokens. Character name is the permanent identifier.
  */
 import type { Database } from "bun:sqlite";
 import type { RoomManager } from "./ws.ts";
 import {
+  resolveSession,
+  createSession,
   saveCharacterData,
   loadCharacterData,
-  reserveName,
+  characterExists,
   createDefaultCharacter,
+  isNameAvailable,
   isAccountClaimed,
   claimAccount,
   loginAccount,
-  releaseUnclaimedName,
-  getJqLeaderboard,
-  getAllJqLeaderboards,
 } from "./db.ts";
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -31,13 +35,18 @@ function jsonResponse(data: unknown, status: number = 200): Response {
   });
 }
 
-function extractSessionId(request: Request): string | null {
+function extractSessionId(request: Request, url: URL): string | null {
   const auth = request.headers.get("Authorization");
-  if (!auth) return null;
-  const parts = auth.split(" ");
-  if (parts.length !== 2 || parts[0] !== "Bearer") return null;
-  const token = parts[1].trim();
-  return token.length > 0 ? token : null;
+  if (auth) {
+    const parts = auth.split(" ");
+    if (parts.length === 2 && parts[0] === "Bearer") {
+      const token = parts[1].trim();
+      if (token.length > 0) return token;
+    }
+  }
+  // Fallback: query param (for sendBeacon)
+  const qs = url.searchParams.get("session");
+  return qs && qs.length > 0 ? qs : null;
 }
 
 // ─── Handler ────────────────────────────────────────────────────────
@@ -64,261 +73,236 @@ export async function handleCharacterRequest(
     });
   }
 
-  // Only handle /api/character/* routes
   if (!path.startsWith("/api/character/")) return null;
 
-  // Login endpoint doesn't require auth (it IS the auth)
+  // Login doesn't require auth
   if (method === "POST" && path === "/api/character/login") {
-    // Handled below — skip auth check
-  } else {
-    // Extract session ID from header or query param (sendBeacon can't set headers)
-    const sessionIdCheck = extractSessionId(request) || url.searchParams.get("session");
-    if (!sessionIdCheck) {
-      return jsonResponse(
-        { ok: false, error: { code: "UNAUTHORIZED", message: "Missing or invalid Authorization header" } },
-        401,
-      );
-    }
+    return handleLogin(request, db);
   }
 
-  // Session ID used by most endpoints (may be null for login)
-  const sessionId = extractSessionId(request) || url.searchParams.get("session") || "";
+  // All other endpoints require a session
+  const sessionId = extractSessionId(request, url);
+  if (!sessionId) {
+    return jsonResponse(
+      { ok: false, error: { code: "UNAUTHORIZED", message: "Missing or invalid Authorization header" } },
+      401,
+    );
+  }
+
+  // Resolve session → character name (null for new sessions)
+  const characterName = resolveSession(db, sessionId);
 
   // ── POST /api/character/create ──
   if (method === "POST" && path === "/api/character/create") {
-    let body: { name?: string; gender?: boolean };
-    try {
-      body = await request.json();
-    } catch {
-      return jsonResponse(
-        { ok: false, error: { code: "INVALID_BODY", message: "Invalid JSON body" } },
-        400,
-      );
-    }
-
-    const name = typeof body.name === "string" ? body.name.trim() : "";
-    const gender = body.gender === true;
-
-    if (name.length < 2 || name.length > 12) {
-      return jsonResponse(
-        { ok: false, error: { code: "INVALID_NAME", message: "Name must be 2-12 characters" } },
-        400,
-      );
-    }
-
-    if (!/^[a-zA-Z0-9 ]+$/.test(name)) {
-      return jsonResponse(
-        { ok: false, error: { code: "INVALID_NAME", message: "Name contains invalid characters" } },
-        400,
-      );
-    }
-
-    // Reject if this session already has a character (use /api/character/save to update)
-    const existingChar = loadCharacterData(db, sessionId);
-    if (existingChar) {
-      return jsonResponse(
-        { ok: false, error: { code: "ALREADY_EXISTS", message: "Character already exists for this session" } },
-        409,
-      );
-    }
-
-    // Check if name is available — if taken by an unclaimed + offline session, reclaim it
-    let nameResult = reserveName(db, sessionId, name);
-    if (!nameResult.ok) {
-      // Name is taken — check if the holder is unclaimed AND offline
-      const released = releaseUnclaimedName(db, name, roomManager);
-      if (released) {
-        // Name was freed — try reserving again
-        nameResult = reserveName(db, sessionId, name);
-      }
-      if (!nameResult.ok) {
-        return jsonResponse(
-          { ok: false, error: { code: "NAME_TAKEN", message: "That name is already taken" } },
-          409,
-        );
-      }
-    }
-
-    // Create default character
-    const save = createDefaultCharacter(db, sessionId, name, gender);
-    return jsonResponse({ ok: true, data: save }, 201);
+    return handleCreate(request, db, sessionId, characterName, roomManager);
   }
 
-  // ── GET /api/character/load ──
+  // All remaining endpoints require an existing character
+  if (!characterName) {
+    return jsonResponse(
+      { ok: false, error: { code: "NOT_FOUND", message: "No character found for this session" } },
+      404,
+    );
+  }
+
   if (method === "GET" && path === "/api/character/load") {
-    const data = loadCharacterData(db, sessionId);
-    if (!data) {
-      return jsonResponse(
-        { ok: false, error: { code: "NOT_FOUND", message: "No character found for this session" } },
-        404,
-      );
-    }
-    return jsonResponse({ ok: true, data });
+    return handleLoad(db, characterName);
+  }
+  if (method === "POST" && path === "/api/character/save") {
+    return handleSave(request, db, characterName);
+  }
+  if (method === "POST" && path === "/api/character/claim") {
+    return handleClaim(request, db, characterName);
+  }
+  if (method === "GET" && path === "/api/character/claimed") {
+    return jsonResponse({ ok: true, claimed: isAccountClaimed(db, characterName) });
   }
 
-  // ── POST /api/character/save ──
-  if (method === "POST" && path === "/api/character/save") {
-    let body: unknown;
+  return null;
+}
 
-    // Support both JSON and sendBeacon (which sends text/plain)
-    const contentType = request.headers.get("Content-Type") || "";
-    try {
-      if (contentType.includes("application/json") || contentType.includes("text/plain")) {
-        body = await request.json();
+// ─── Endpoint handlers ──────────────────────────────────────────────
+
+async function handleCreate(
+  request: Request,
+  db: Database,
+  sessionId: string,
+  existingName: string | null,
+  roomManager?: RoomManager,
+): Promise<Response> {
+  // Reject if this session already has a character
+  if (existingName) {
+    return jsonResponse(
+      { ok: false, error: { code: "ALREADY_EXISTS", message: "Character already exists for this session" } },
+      409,
+    );
+  }
+
+  let body: { name?: string; gender?: boolean };
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse(
+      { ok: false, error: { code: "INVALID_BODY", message: "Invalid JSON body" } },
+      400,
+    );
+  }
+
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  const gender = body.gender === true;
+
+  if (name.length < 2 || name.length > 12) {
+    return jsonResponse(
+      { ok: false, error: { code: "INVALID_NAME", message: "Name must be 2-12 characters" } },
+      400,
+    );
+  }
+
+  if (!/^[a-zA-Z0-9 ]+$/.test(name)) {
+    return jsonResponse(
+      { ok: false, error: { code: "INVALID_NAME", message: "Name contains invalid characters" } },
+      400,
+    );
+  }
+
+  if (!isNameAvailable(db, name, roomManager)) {
+    return jsonResponse(
+      { ok: false, error: { code: "NAME_TAKEN", message: "That name is already taken" } },
+      409,
+    );
+  }
+
+  const save = createDefaultCharacter(db, sessionId, name, gender);
+  return jsonResponse({ ok: true, data: save }, 201);
+}
+
+function handleLoad(db: Database, characterName: string): Response {
+  const data = loadCharacterData(db, characterName);
+  if (!data) {
+    return jsonResponse(
+      { ok: false, error: { code: "NOT_FOUND", message: "No character data found" } },
+      404,
+    );
+  }
+  return jsonResponse({ ok: true, data });
+}
+
+async function handleSave(request: Request, db: Database, characterName: string): Promise<Response> {
+  let body: unknown;
+  const contentType = request.headers.get("Content-Type") || "";
+  try {
+    if (contentType.includes("application/json") || contentType.includes("text/plain")) {
+      body = await request.json();
+    } else {
+      const text = await request.text();
+      body = JSON.parse(text);
+    }
+  } catch {
+    return jsonResponse(
+      { ok: false, error: { code: "INVALID_BODY", message: "Invalid JSON body" } },
+      400,
+    );
+  }
+
+  if (!body || typeof body !== "object" || !("version" in body)) {
+    return jsonResponse(
+      { ok: false, error: { code: "INVALID_BODY", message: "Missing version field" } },
+      400,
+    );
+  }
+
+  // Preserve server-authoritative achievements
+  const existing = loadCharacterData(db, characterName);
+  if (!existing) {
+    return jsonResponse(
+      { ok: false, error: { code: "NOT_FOUND", message: "No character exists — use /api/character/create first" } },
+      404,
+    );
+  }
+
+  const existingData = existing as Record<string, any>;
+  const bodyObj = body as Record<string, any>;
+  if (existingData.achievements && typeof existingData.achievements === "object") {
+    if (!bodyObj.achievements || typeof bodyObj.achievements !== "object") bodyObj.achievements = {};
+    const serverJq = existingData.achievements.jq_quests;
+    const clientJq = bodyObj.achievements.jq_quests;
+    if (serverJq && typeof serverJq === "object") {
+      if (!clientJq || typeof clientJq !== "object") {
+        bodyObj.achievements.jq_quests = { ...serverJq };
       } else {
-        // Try parsing as JSON regardless
-        const text = await request.text();
-        body = JSON.parse(text);
-      }
-    } catch {
-      return jsonResponse(
-        { ok: false, error: { code: "INVALID_BODY", message: "Invalid JSON body" } },
-        400,
-      );
-    }
-
-    if (!body || typeof body !== "object" || !("version" in body)) {
-      return jsonResponse(
-        { ok: false, error: { code: "INVALID_BODY", message: "Missing version field" } },
-        400,
-      );
-    }
-
-    // Only allow saving if character already exists (created via /api/character/create)
-    const existing = loadCharacterData(db, sessionId);
-    if (!existing) {
-      return jsonResponse(
-        { ok: false, error: { code: "NOT_FOUND", message: "No character exists — use /api/character/create first" } },
-        404,
-      );
-    }
-
-    // Preserve server-authoritative achievements — client save must not overwrite them
-    const existingData = existing as Record<string, any>;
-    const bodyObj = body as Record<string, any>;
-    if (existingData.achievements && typeof existingData.achievements === "object") {
-      // Merge: keep server jq_quests (take max), preserve client structure
-      if (!bodyObj.achievements || typeof bodyObj.achievements !== "object") bodyObj.achievements = {};
-      const serverJq = existingData.achievements.jq_quests;
-      const clientJq = bodyObj.achievements.jq_quests;
-      if (serverJq && typeof serverJq === "object") {
-        if (!clientJq || typeof clientJq !== "object") {
-          bodyObj.achievements.jq_quests = { ...serverJq };
-        } else {
-          for (const [k, v] of Object.entries(serverJq)) {
-            const sv = Number(v) || 0;
-            const cv = Number(clientJq[k]) || 0;
-            bodyObj.achievements.jq_quests[k] = Math.max(sv, cv);
-          }
+        for (const [k, v] of Object.entries(serverJq)) {
+          const sv = Number(v) || 0;
+          const cv = Number(clientJq[k]) || 0;
+          bodyObj.achievements.jq_quests[k] = Math.max(sv, cv);
         }
       }
     }
-
-    saveCharacterData(db, sessionId, JSON.stringify(bodyObj));
-    return jsonResponse({ ok: true });
   }
 
-  // ── POST /api/character/name ──
-  if (method === "POST" && path === "/api/character/name") {
-    let body: { name?: string };
-    try {
-      body = await request.json();
-    } catch {
-      return jsonResponse(
-        { ok: false, error: { code: "INVALID_BODY", message: "Invalid JSON body" } },
-        400,
-      );
-    }
+  saveCharacterData(db, characterName, JSON.stringify(bodyObj));
+  return jsonResponse({ ok: true });
+}
 
-    const name = typeof body.name === "string" ? body.name.trim() : "";
-    if (name.length < 2 || name.length > 12) {
-      return jsonResponse(
-        { ok: false, error: { code: "INVALID_NAME", message: "Name must be 2-12 characters" } },
-        400,
-      );
-    }
-
-    const result = reserveName(db, sessionId, name);
-    if (!result.ok) {
-      return jsonResponse(
-        { ok: false, error: { code: "NAME_TAKEN", message: "That name is already taken" } },
-        409,
-      );
-    }
-    return jsonResponse({ ok: true });
+async function handleClaim(request: Request, db: Database, characterName: string): Promise<Response> {
+  let body: { password?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse(
+      { ok: false, error: { code: "INVALID_BODY", message: "Invalid JSON body" } },
+      400,
+    );
   }
 
-  // ── POST /api/character/claim ──
-  if (method === "POST" && path === "/api/character/claim") {
-    let body: { password?: string };
-    try {
-      body = await request.json();
-    } catch {
-      return jsonResponse(
-        { ok: false, error: { code: "INVALID_BODY", message: "Invalid JSON body" } },
-        400,
-      );
-    }
-
-    const password = typeof body.password === "string" ? body.password : "";
-    if (password.length < 4) {
-      return jsonResponse(
-        { ok: false, error: { code: "INVALID_PASSWORD", message: "Password must be at least 4 characters" } },
-        400,
-      );
-    }
-
-    const result = await claimAccount(db, sessionId, password);
-    if (!result.ok) {
-      const msg = result.reason === "already_claimed" ? "Account is already claimed" : "Could not claim account";
-      return jsonResponse(
-        { ok: false, error: { code: "ALREADY_CLAIMED", message: msg } },
-        409,
-      );
-    }
-    return jsonResponse({ ok: true });
+  const password = typeof body.password === "string" ? body.password : "";
+  if (password.length < 4) {
+    return jsonResponse(
+      { ok: false, error: { code: "INVALID_PASSWORD", message: "Password must be at least 4 characters" } },
+      400,
+    );
   }
 
-  // ── GET /api/character/claimed ──
-  if (method === "GET" && path === "/api/character/claimed") {
-    return jsonResponse({ ok: true, claimed: isAccountClaimed(db, sessionId) });
+  const result = await claimAccount(db, characterName, password);
+  if (!result.ok) {
+    const msg = result.reason === "already_claimed" ? "Account is already claimed" : "Could not claim account";
+    return jsonResponse(
+      { ok: false, error: { code: "ALREADY_CLAIMED", message: msg } },
+      409,
+    );
+  }
+  return jsonResponse({ ok: true });
+}
+
+async function handleLogin(request: Request, db: Database): Promise<Response> {
+  let body: { name?: string; password?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse(
+      { ok: false, error: { code: "INVALID_BODY", message: "Invalid JSON body" } },
+      400,
+    );
   }
 
-  // ── POST /api/character/login (no auth required — this IS the auth) ──
-  if (method === "POST" && path === "/api/character/login") {
-    let body: { name?: string; password?: string };
-    try {
-      body = await request.json();
-    } catch {
-      return jsonResponse(
-        { ok: false, error: { code: "INVALID_BODY", message: "Invalid JSON body" } },
-        400,
-      );
-    }
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  const password = typeof body.password === "string" ? body.password : "";
 
-    const name = typeof body.name === "string" ? body.name.trim() : "";
-    const password = typeof body.password === "string" ? body.password : "";
-
-    if (!name || !password) {
-      return jsonResponse(
-        { ok: false, error: { code: "INVALID_BODY", message: "Name and password are required" } },
-        400,
-      );
-    }
-
-    const result = await loginAccount(db, name, password);
-    if (!result.ok) {
-      const msg = result.reason === "not_claimed"
-        ? "This account has not been claimed yet"
-        : "Invalid username or password";
-      return jsonResponse(
-        { ok: false, error: { code: "INVALID_CREDENTIALS", message: msg } },
-        401,
-      );
-    }
-    return jsonResponse({ ok: true, session_id: result.session_id });
+  if (!name || !password) {
+    return jsonResponse(
+      { ok: false, error: { code: "INVALID_BODY", message: "Name and password are required" } },
+      400,
+    );
   }
 
-  // Unknown /api/character/ route
-  return null;
+  const result = await loginAccount(db, name, password);
+  if (!result.ok) {
+    const msg = result.reason === "not_claimed"
+      ? "This account has not been claimed yet"
+      : "Invalid username or password";
+    return jsonResponse(
+      { ok: false, error: { code: "INVALID_CREDENTIALS", message: msg } },
+      401,
+    );
+  }
+  return jsonResponse({ ok: true, session_id: result.session_id });
 }

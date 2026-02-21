@@ -93,7 +93,7 @@ describe("character API", () => {
   test("POST /api/character/create rejects invalid name", async () => {
     const res = await fetch(`${baseUrl}/api/character/create`, {
       method: "POST",
-      headers: authHeaders(session2),
+      headers: authHeaders("fresh-invalid-name-test"),
       body: JSON.stringify({ name: "A", gender: false }),
     });
     expect(res.status).toBe(400);
@@ -223,39 +223,6 @@ describe("character API", () => {
     expect(loadBody.data.stats.level).toBe(7);
   });
 
-  // ── Name ──
-
-  test("POST /api/character/name reserves a new name", async () => {
-    // Create session2 character first
-    await fetch(`${baseUrl}/api/character/create`, {
-      method: "POST",
-      headers: authHeaders(session2),
-      body: JSON.stringify({ name: "Player2", gender: true }),
-    });
-
-    const res = await fetch(`${baseUrl}/api/character/name`, {
-      method: "POST",
-      headers: authHeaders(session2),
-      body: JSON.stringify({ name: "NewName2" }),
-    });
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.ok).toBe(true);
-  });
-
-  test("POST /api/character/name rejects taken name", async () => {
-    // session1 owns "TestPlayer2" — session2 shouldn't be able to take it
-    // (session1 is unclaimed but /name endpoint doesn't release unclaimed names)
-    const res = await fetch(`${baseUrl}/api/character/name`, {
-      method: "POST",
-      headers: authHeaders(session2),
-      body: JSON.stringify({ name: "TestPlayer2" }),
-    });
-    expect(res.status).toBe(409);
-    const body = await res.json();
-    expect(body.error.code).toBe("NAME_TAKEN");
-  });
-
   // ── Claim ──
 
   test("POST /api/character/claim sets password", async () => {
@@ -316,7 +283,10 @@ describe("character API", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
-    expect(body.session_id).toBe(session1);
+    expect(typeof body.session_id).toBe("string");
+    expect(body.session_id.length).toBeGreaterThan(0);
+    // Login returns a NEW session_id (not the original one)
+    expect(body.session_id).not.toBe(session1);
   });
 
   test("POST /api/character/login rejects wrong password", async () => {

@@ -1236,7 +1236,9 @@ function showDuplicateLoginOverlay() {
     }
   });
   overlay.querySelector("#dup-login-logout").addEventListener("click", () => {
-    localStorage.removeItem("maple_session_id");
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(CHARACTER_SAVE_KEY);
+    localStorage.removeItem("maple_session_id"); // legacy key
     localStorage.removeItem("mapleweb.save.v1");
     localStorage.removeItem("mapleweb.settings.v1");
     localStorage.removeItem("mapleweb.keybinds.v1");

@@ -15,7 +15,7 @@
  * - Metrics collection
  */
 
-import { initDatabase, loadCharacterData, getJqLeaderboard, getAllJqLeaderboards } from "./db.ts";
+import { initDatabase, resolveSession, loadCharacterData, getJqLeaderboard, getAllJqLeaderboards } from "./db.ts";
 import { handleCharacterRequest } from "./character-api.ts";
 import { RoomManager, handleClientMessage, setDebugMode, setDatabase, persistClientState } from "./ws.ts";
 import type { WSClient, WSClientData } from "./ws.ts";
@@ -508,13 +508,19 @@ export function createServer(
 
             const sessionId = parsed.session_id as string;
 
-            // Load character from DB (or create default if none exists)
             if (!db) {
               ws.close(4005, "No database configured");
               return;
             }
 
-            const charData = loadCharacterData(db, sessionId) as {
+            // Resolve session → character name
+            const characterName = resolveSession(db, sessionId);
+            if (!characterName) {
+              ws.close(4002, "No character found for this session");
+              return;
+            }
+
+            const charData = loadCharacterData(db, characterName) as {
               identity: { name: string; gender: boolean; face_id: number; hair_id: number; skin: number };
               stats: { level?: number; job?: string; exp?: number; max_exp?: number;
                        hp?: number; max_hp?: number; mp?: number; max_mp?: number;
