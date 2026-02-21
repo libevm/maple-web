@@ -310,16 +310,14 @@ function loadMapData(paddedMapId: string): MapData | null {
   const prefix = paddedMapId.charAt(0);
   const relPath = `Map.wz/Map/Map${prefix}/${paddedMapId}.img.json`;
 
-  for (const root of ["resourcesv2", "resources"]) {
-    const fullPath = resolve(PROJECT_ROOT, root, relPath);
-    if (!existsSync(fullPath)) continue;
+  const fullPath = resolve(PROJECT_ROOT, "resourcesv2", relPath);
+  if (existsSync(fullPath)) {
     try {
       const text = readFileSync(fullPath, "utf-8");
       const raw = JSON.parse(text);
       return parseMapData(raw);
     } catch (err) {
       console.warn(`[map-data] Failed to parse ${fullPath}: ${err}`);
-      continue;
     }
   }
   return null;
@@ -416,15 +414,14 @@ function loadNpcScriptId(npcId: string): string {
   const padded = String(npcId).padStart(7, "0");
   const relPath = `Npc.wz/${padded}.img.json`;
 
-  for (const root of ["resourcesv2", "resources"]) {
-    const fullPath = resolve(PROJECT_ROOT, root, relPath);
-    if (!existsSync(fullPath)) continue;
+  const fullPath = resolve(PROJECT_ROOT, "resourcesv2", relPath);
+  if (existsSync(fullPath)) {
     try {
       const text = readFileSync(fullPath, "utf-8");
       const raw = JSON.parse(text);
       return parseNpcScriptId(raw);
     } catch {
-      continue;
+      // ignore
     }
   }
   return "";

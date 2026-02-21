@@ -58,7 +58,8 @@ Used by `POST /api/character/save`, `GET /api/character/load`, and localStorage.
 
 ```json
 {
-  "identity": { "name": "<user-chosen>", "gender": false, "skin": 0, "face_id": 20000, "hair_id": 30000 },
+  "name": "<from characters.name column, not in data blob>",
+  "identity": { "gender": false, "skin": 0, "face_id": 20000, "hair_id": 30000 },
   "stats": { "level": 1, "job": "Beginner", "exp": 0, "max_exp": 15, "hp": 50, "max_hp": 50, "mp": 5, "max_mp": 5, "speed": 100, "jump": 100, "meso": 0 },
   "location": { "map_id": "100000001", "spawn_portal": null, "facing": -1 },
   "equipment": [

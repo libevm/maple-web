@@ -35,6 +35,9 @@
 - **Session ID**: random UUID generated on first visit, stored in `localStorage` as `mapleweb.session`
 - **Session ID is a transient auth token** — NOT the permanent identifier
 - **Character name is the permanent unique identifier** for all server state
+- **Name is NOT stored in the `data` JSON blob** — it lives only in the `characters.name` column
+- API load/create responses inject `identity.name` for client compatibility; save handler strips it
+- Client `buildCharacterSave()` stores `name` at the top level (for offline compat), not in `identity`
 - `sessions` table maps `session_id → character_name` (transient lookup)
 - Login generates a **new** session_id each time (old one is effectively abandoned)
 - Sent as `Authorization: Bearer <session-id>` header on REST, and as first WS message
@@ -101,7 +104,7 @@ POST /api/character/login   Body: { name, password } No auth header needed      
 
 | Field | Type | Default | Code Source |
 |-------|------|---------|-------------|
-| `name` | string | `"MapleWeb"` | `runtime.player.name` |
+| `name` | string | `"MapleWeb"` | `characters.name` column (not in data blob) |
 | `gender` | boolean | `false` (male) | `runtime.player.gender` |
 | `skin` | number | `0` | Not yet impl |
 | `face_id` | number | `20000` (male) / `21000` (female) | `runtime.player.face_id` |

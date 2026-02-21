@@ -3,14 +3,13 @@
 ## Prerequisites
 
 - **Bun** ≥ 1.3 — `bun --version`
-- Pre-extracted WZ JSON files in `resources/` and `resourcesv2/`
+- Pre-extracted WZ JSON files in `resourcesv2/` (get them from https://github.com/Jeck-Sparrow-5/MapleWeb)
 
 ## WZ Files
 
 The game reads pre-extracted MapleStory `.wz` archives as JSON (`.img.json` files).
 
 Two directories are used:
-- `resources/` — original v1 extraction (read-only reference)
 - `resourcesv2/` — working copy used by the game (edits go here)
 
 Both follow the same structure: `{Archive}.wz/{path}.img.json`  
