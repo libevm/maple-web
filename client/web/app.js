@@ -9410,9 +9410,8 @@ function getCharacterFrameData(
       // Non-climbing: always draw hairBelowBody, hairShade, hair (DEFAULT)
       // Cap-type controls hairOverHead and backHair layers
       if (capType === "FULLCOVER") {
-        // Hide hairOverHead and backHair (cap covers everything)
-        if (z === "hairOverHead" || z === "backHair") continue;
-        if (layerName === "hairOverHead" || layerName === "backHair") continue;
+        // Hide ALL hair layers (cap covers everything)
+        continue;
       } else if (capType === "HALFCOVER") {
         // Hide hairOverHead (half-covered), swap backHair → backHairBelowCap
         if (z === "hairOverHead") continue;

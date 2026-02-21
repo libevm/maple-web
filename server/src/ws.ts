@@ -885,9 +885,9 @@ export function handleClientMessage(
       const jqQuests = client.achievements.jq_quests as Record<string, number>;
       jqQuests[achKey] = (jqQuests[achKey] || 0) + 1;
 
-      // Update JQ leaderboard
+      // Update JQ leaderboard (keyed by player name)
       if (_moduleDb) {
-        incrementJqLeaderboard(_moduleDb, client.id, achKey);
+        incrementJqLeaderboard(_moduleDb, client.name, achKey);
       }
 
       // Bonus drop: Zakum Helmet (25% chance on Breath of Lava completion)
