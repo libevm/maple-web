@@ -972,6 +972,7 @@ function findClosestSpawnPortal(x, y) {
  */
 function buildCharacterSave() {
   return {
+    name: runtime.player.name,
     identity: {
       gender: runtime.player.gender ?? false,
       skin: 0,
