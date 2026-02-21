@@ -22,6 +22,7 @@
     "client:web": "bun run --cwd client web",
     "client:offline": "bun run --cwd client offline",
     "client:online": "bun run --cwd client online",
+    "client:online:prod": "bun run --cwd client online:prod",
     "server": "bun run --cwd server dev",
     "extract:v2": "node tools/build-assets/extract-v2-maps.mjs",
     "make-gm": "bun run server/src/make-gm.ts"

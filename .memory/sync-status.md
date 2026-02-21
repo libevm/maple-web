@@ -1,13 +1,13 @@
 # .memory Sync Status
 
-Last synced: 2026-02-21T20:00:00+11:00
+Last synced: 2026-02-22T07:03:00+11:00
 Status: ✅ Synced
 
-## 2026-02-21 update (Tailwind v4 CSS build fix)
-- Fixed `bun run --cwd client css` / `online` failure: `Can't resolve 'tailwindcss/theme'`.
-- Root cause: `client/package.json` had `@tailwindcss/cli` but was missing `tailwindcss` package.
-- Change: added `tailwindcss@^4.2.0` to `client/devDependencies`.
-- Result: CSS build succeeds and `bun run --cwd client online` starts normally.
+## 2026-02-22 update (full source code audit + .memory refresh)
+- Full audit of all server and client source files against `.memory/` docs.
+- Added root `client:online:prod` script to `package.json`.
+- Updated `README.DEV.md` with `bun run client:online --prod` in both Running and Production sections.
+- Updated `.memory/` docs to reflect all recent features: PoW system, --prod flag, progress bar overlay, chat bubble fix, tab blur fix, Git LFS notes.
 - Note: attempted required read-only reference scan paths from `AGENTS.md` (`/home/k/Development/Libevm/MapleWeb`, `/home/k/Development/Libevm/MapleStory-Client`) but those paths are not present in this environment.
 
 ## Current authoritative memory files
@@ -25,13 +25,15 @@ Status: ✅ Synced
 | `game-design.md` | High-level game design notes and feature goals |
 | `tech-stack.md` | Technology choices (partially stale — actual stack is vanilla JS + raw Bun.serve) |
 | `cpp-port-architecture-snapshot.md` | C++ reference client architecture snapshot (read-only reference) |
+| `api-endpoints.md` | All REST and WS endpoints summary |
 
 ## Codebase Metrics
-- `client/web/app.js`: ~11,700 lines
-- CI: `bun run ci` ✅ (167 tests across 6 suites)
+- `client/web/app.js`: ~14,700 lines
+- CI: `bun run ci` — tests passing
+- Server: 69 tests across 3 files
 - `runtime.player.face_id` / `runtime.player.hair_id`: stored character state (not derived from gender)
-- FPS counter includes ping display (color-coded, 10s interval)
-- Latest commit: `5659977` on `origin/main`
+- FPS counter includes ping display (color-coded, 5s interval)
+- Latest commit: `9361f3b` on `origin/main`
 
 ## Key Architecture Decisions
 
@@ -43,106 +45,108 @@ Status: ✅ Synced
 - Proximity culling: only relay within same map room
 
 ### Session & auth model
-- Session ID = random UUID in localStorage (`mapleweb.session`)
-- Character name first-come-first-serve, immutable once claimed
+- **Proof-of-Work session acquisition**: new visitors solve a SHA-256 PoW challenge before getting a session
+  - `GET /api/pow/challenge` → `{ challenge, difficulty }` (difficulty default 20 bits, env `POW_DIFFICULTY`)
+  - Client finds nonce where SHA-256(challenge+nonce) has `difficulty` leading zero bits
+  - `POST /api/pow/verify { challenge, nonce }` → `{ session_id }`
+  - Challenge expires after 60s, max 10k pending
+  - Prevents bot/spam account creation
+  - Client shows a sliding progress bar overlay during PoW solving
+- Session ID stored in `localStorage` as `mapleweb.session`
+- **Character name** is the permanent unique identifier
 - Character creation: Login/Create tabs on first visit (online defaults to Login tab)
 - Account claiming: optional password (min 4 chars) via glowing HUD button → bcrypt hashed
 - Login: name + password → server returns session_id → client adopts it
 - Logout: clears localStorage, warns unclaimed accounts about data loss
+- Sessions validated via `valid_sessions` table; unused sessions expire after 7 days
+- Periodic session purge every hour on server
 
 ### WebSocket protocol
 - Auth via `{ type: "auth", session_id: "..." }` (JSON, first message, includes type field)
 - 20 Hz position updates (move messages)
 - Immediate action events (chat, attack, face, sit, prone, climb, etc.)
-- Map enter ACK: client sends leave_map → loads map → sends enter_map → waits for map_state
-- Ping/pong heartbeat every 10s, 30s disconnect timeout
+- Server-authoritative map transitions: `change_map` → `map_loaded` → `map_state`
+- Ping/pong heartbeat every 5s (client sends), 30s disconnect timeout (server checks)
 - Default character created on first WS auth if none exists
 
 ### Remote player rendering (C++ OtherChar parity)
 - **Snapshot interpolation**: buffer received positions with timestamps, render 100ms
-  "in the past", lerp between bracketing snapshots. Eliminates jitter regardless of ping.
+  "in the past", lerp between bracketing snapshots
 - Constants: `REMOTE_INTERP_DELAY_MS=100`, `REMOTE_SNAPSHOT_MAX=20`
 - Teleport detection: >300px between snapshots → instant snap
 - Animation fully local: client runs frame timers per remote player
 - Per-player equip WZ data storage (separate from local player)
 - **Remote attack frame delay**: reads actual WZ delay from body data (not hardcoded)
-- **Remote face expressions**: synced via `player_face` message, shown for 2.5s (hit/pain: 500ms), frame 0 only (no cycling to avoid async decode blink), pre-warmed on receipt
-- **Render layer from footholds**: `remotePlayerRenderLayer(rp)` computes layer client-side from `findFootholdAtXNearY` at remote player position — no server layer field needed
-- **Hit expression sync**: `triggerPlayerHitVisuals` broadcasts `{ type: "face", expression: "hit" }` on trap/mob knockback; skips emote cooldown
-- **Per-player look data**: `remoteLookData` Map stores per-player face/hair WZ data; never falls back to local player's data
-- **Look-prefixed image cache keys**: remote player part images keyed as `rp:{face_id}:{hair_id}:{action}:{frame}:{part}` to prevent cache collisions between different genders/faces/hairs
-- **Server sends gender** in `PlayerLook` (`gender: boolean`, false=male, true=female)
-- **Character info modal**: double-click remote player → draggable HUD modal with 80px sprite (async render with retry for hair), name, accomplishments placeholder; X close button in titlebar; per-player image cache keys (`rp:{face_id}:{hair_id}:...`) prevent gender/look collisions
+- **Remote face expressions**: synced via `player_face` message, shown for 2.5s (hit/pain: 500ms), frame 0 only, pre-warmed on receipt
+- **Render layer from footholds**: computed client-side from `findFootholdAtXNearY`
+- **Look-prefixed image cache keys**: `rp:{face_id}:{hair_id}:{action}:{frame}:{part}`
+- **Character info modal**: double-click remote player → draggable HUD modal
 
 ### Server-authoritative item drops
 - Server stores drops per map: `RoomManager.mapDrops: Map<mapId, Map<drop_id, MapDrop>>`
 - Drop flow: client sends `drop_item` → server assigns `drop_id` → broadcasts `drop_spawn` to ALL
 - Loot flow: client sends `loot_item { drop_id }` → server removes → broadcasts `drop_loot` to ALL
-- Loot animation flies toward looter's position (local or remote player)
+- 5s loot protection for reactor/mob drops (owner = majority damage dealer)
 - `map_state` includes `drops[]` for players entering a map
-- `MapDrop` fields: drop_id, item_id, name, qty, x, startY, destY, owner_id, iconKey, category
-- Offline mode: drops work locally with negative temp IDs
+- Drop expiry: 180s server-side sweep, 2s client fade-out
+
+### Mob authority system
+- First player in map becomes mob authority (runs AI locally, sends at 10Hz)
+- Authority reassigned when player leaves
+- Non-authority clients receive positions, skip local AI/physics
+- Mob damage broadcast via `mob_damage` message
 
 ### Cooldowns
-- **Chat**: 1s cooldown (`_lastChatSendTime`) — `sendChatMessage` drops if <1s
-- **Emote**: 1s cooldown (`_lastEmoteTime`) — face hotkeys ignored if <1s since last
+- **Chat**: 1s cooldown
+- **Emote**: 1s cooldown
 
 ### Duplicate login blocking
-- WS 4006 now shows full-screen blocking modal BEFORE map loads
-- `connectWebSocketAsync()` returns promise: true on auth success, false on 4006
-- Boot sequence: connect WS → if blocked, show overlay + stop → else load map
-- Overlay has Retry (reconnects, loads map on success) and Log Out (full wipe)
+- WS 4006 shows full-screen blocking modal BEFORE map loads
+- Overlay has Retry and Log Out options
+
+### Production mode (`--prod` flag)
+- `bun run client:online --prod` — minifies JS via Bun.build, gzips all assets at startup
+- Pre-compressed assets served from memory with `Content-Encoding: gzip`
+- ETag support for conditional requests (304 Not Modified)
+- CSS already minified by Tailwind CLI, just gzip-wrapped
+- HTML: online config injected + whitespace collapsed + gzipped
+- Startup logs show per-asset size reduction
+
+### Online client server hardening
+- Security headers: X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy, COOP
+- Cache-control: HTML=no-cache, JS/CSS=1h revalidate, game resources=7d immutable
+- Method allowlist: static routes GET/HEAD only, API routes all methods
+- CORS preflight handling with configurable origin
+- Proxy timeout with 504 on slow game server
+- Path traversal hardened (null byte rejection, normalize check)
+- WebSocket proxy: client→online server→game server relay (Bun WS, buffered during upstream connect)
 
 ### Movement keybinds
-- WASD removed — only configurable movement keys (default: arrow keys)
+- Configurable movement keys (default: arrow keys)
 - `moveLeft`, `moveRight`, `moveUp`, `moveDown` in `runtime.keybinds`
-- `getGameplayKeys()` builds key set dynamically from current keybinds
 
-### Claim account button
-- Golden pulsing animation (1.5s cycle, scale 1→1.08)
-- Red "!" notification badge with bounce
-- Standard 34px icon-only button, aligned with other HUD buttons
+### GM System
+- `characters.gm` column, toggled via `bun run make-gm <username>`
+- Client-side: `/mousefly`, `/overlay`, `/help`
+- Server-side: `/map <id>`, `/teleport <user> <map_id>`
+- GM overlay: footholds, ropes, tiles, NPCs, mobs, portals, reactors, hitboxes, HUD
 
-### Name reclaiming
-- Unclaimed (no password) + offline (no WS) names are reclaimable
-- `releaseUnclaimedName(db, name, roomManager)`: checks credentials + getClient
-- Claimed names permanently protected; online unclaimed names protected
-- `saveCharacterData` is UPDATE-only; `insertCharacterData` for create only
-- Integration tests verify online protection + offline reclaim
+### Chat system
+- `type: "system"` — grey text, italic
+- `type: "system", subtype: "welcome"` — yellow, italic
+- 24 jump-quest-themed welcome phrases on map load
+- Chat bubble text vertically centered (textBaseline middle fix)
+- Chat UI hidden until map loads
 
-### Mob authority system (server-synced mobs)
-- First player in a map becomes mob authority — runs AI locally, sends at 10Hz
-- `RoomManager.mobAuthority: Map<mapId, sessionId>` tracks per-map authority
-- `map_state` includes `mob_authority: boolean` flag
-- On authority leave: server reassigns + sends `mob_authority { active: true }`
-- Authority sends `mob_state { mobs: [...] }` — positions, stances, hp, dead/dying
-- Non-authority clients apply received positions, skip local AI/physics
-- Non-authority attacks: `applyAttackToMobVisualOnly()` → local damage numbers + sends `mob_damage` to server
-- Authority receives `mob_damage` → applies HP, knockback, hit stance, death
-- `updateMobCombatStates` guarded: non-authority skips dying/respawn logic
-- Mob touch collisions still local (player taking damage from mob contact)
-- Traps: no sync needed — static map data, collision is local
-- `_isMobAuthority` reset on `loadMap` (reassigned by `map_state`)
-- Offline mode: mobs run locally as before (no authority system)
+### Tab/window blur handling
+- Player reset to idle (stand) action when tab/window loses focus
+- Prevents stuck walking animations when alt-tabbing
 
-### Drop expiry
-- Server sweeps every 5s, removes drops older than 180s, broadcasts `drop_expire`
-- Client: 2s fade-out animation on expire; offline fallback timer
-
-### File organization
-- Split `app.js` into modules before Phase 4: `net.js`, `save.js`, `ui-character-create.js`
-- Server and static file server remain separate (`server/` vs `tools/dev/serve-client-*.mjs`)
-- Character API is a separate middleware layer in server
-
-### Persistence split
-- Server-persisted (6 groups): identity, stats, location, equipment, inventory, achievements
-- Client-only localStorage (2 groups): keybinds, settings
-- Spawn portal stored as portal name (not index), resolved by `findClosestSpawnPortal(x, y)`
-
-### V2 map set
-- 21 maps: Henesys + Shumi JQs (9) + John JQs (6) + Forest of Patience (2) + Breath of Lava (2)
-- Sound.wz: filtered per-track extraction (not whole-file copy)
-- Default spawn: `100000001` (Henesys Townstreet)
+### Debug/diagnostic features
+- `dlog(category, msg)` — internal ring buffer, 5000-line max
+- Settings > Download Debug Logs exports full buffer
+- Git LFS pointer detection in loadMap error for clearer diagnostics
+- Fatal load failures show error message overlay
 
 ## Key Data Structures
 

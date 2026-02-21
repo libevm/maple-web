@@ -20,8 +20,8 @@
 - Designed to run behind Caddy (or similar reverse proxy) for TLS + compression
 - Injects `window.__MAPLE_ONLINE__ = true` and `window.__MAPLE_SERVER_URL__` into HTML
 - Proxies `/api/*` requests to game server (default `http://127.0.0.1:5200`)
+- WebSocket proxy: `/ws` → game server WS (buffered during upstream connect)
 - Client detects online mode via `window.__MAPLE_ONLINE__` flag
-- WebSocket: client connects directly to game server URL
 - File: `tools/dev/serve-client-online.mjs`
 - Env vars:
   - `CLIENT_WEB_HOST` (default `127.0.0.1`)
@@ -29,7 +29,18 @@
   - `GAME_SERVER_URL` (default `http://127.0.0.1:5200`)
   - `ALLOWED_ORIGIN` (default `""` — reflects request origin; set to lock down CORS)
   - `PROXY_TIMEOUT_MS` (default `10000`)
-- Production hardening:
+
+### Online Production (`bun run client:online --prod`)
+- All features of online mode plus:
+- **JS minification** via `Bun.build` (tree-shaken, ESM target)
+- **Gzip pre-compression** of all client assets at startup (JS, CSS, HTML)
+- **HTML injection** of online config + whitespace collapsing
+- Assets served from memory (`prodAssets` Map) with `Content-Encoding: gzip`
+- ETag-based conditional responses (304 Not Modified)
+- Startup logs show per-asset size reduction (raw → min → gz)
+- Root scripts: `bun run client:online:prod` or `bun run --cwd client online:prod`
+
+### Production hardening (both online modes):
   - Security headers on all responses (X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy, COOP)
   - ETag support with 304 Not Modified for conditional requests
   - Cache-control: HTML=no-cache, JS/CSS=1h revalidate, game resources=7d immutable
@@ -55,8 +66,21 @@
 
 ## Session & Auth Model
 
+### Proof-of-Work Session Acquisition
+- New visitors must solve a SHA-256 Proof-of-Work challenge before getting a session
+- `GET /api/pow/challenge` → `{ challenge (64-char hex), difficulty }` (default 20 bits, env `POW_DIFFICULTY`)
+- Client finds `nonce` (max 32 chars) where SHA-256(challenge + nonce) has `difficulty` leading zero bits
+- `POST /api/pow/verify { challenge, nonce }` → `{ session_id }` (64-char hex)
+- Challenge TTL: 60 seconds. Max pending: 10,000.
+- Prevents bot/spam account creation (~1s solve time on modern browser at 20 bits)
+- Client shows a sliding progress bar overlay during solving
+- `valid_sessions` table tracks all server-issued sessions (PoW or login)
+- Sessions expire after 7 days of inactivity (`last_used_at` column)
+- Server purges expired sessions hourly via `purgeExpiredSessions()`
+- WebSocket auth validates session exists in `valid_sessions` before accepting
+
 ### Session Identity
-- **Session ID**: random UUID generated on first visit, stored in `localStorage` as `mapleweb.session`
+- **Session ID**: acquired via PoW challenge or login, stored in `localStorage` as `mapleweb.session`
 - **Session ID is a transient auth token** — NOT the permanent identifier
 - **Character name is the permanent unique identifier** for all server state
 - **Name is NOT stored in the `data` JSON blob** — it lives only in the `characters.name` column
@@ -110,6 +134,20 @@ CREATE TABLE characters (
   version INTEGER DEFAULT 1,
   gm INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE valid_sessions (
+  session_id TEXT PRIMARY KEY,
+  created_at TEXT DEFAULT (datetime('now')),
+  last_used_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE jq_leaderboard (
+  player_name TEXT NOT NULL COLLATE NOCASE,
+  quest_name TEXT NOT NULL,
+  completions INTEGER NOT NULL DEFAULT 0,
+  best_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (player_name, quest_name)
 );
 ```
 

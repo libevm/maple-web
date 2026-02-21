@@ -1,5 +1,10 @@
 # Recommended Tech Stack (Client + Server JS/TS, **Bun runtime**)
 
+> **⚠️ PARTIALLY STALE** — This was the original recommendation. The actual
+> implementation diverged: client is vanilla JS (no Vite, no React), server
+> uses raw `Bun.serve()` (no Fastify), and most libraries below were not adopted.
+> See "Actual Stack" section at the end for the real current state.
+
 Date: 2026-02-17
 Based on:
 - `.memory/game-design.md`
@@ -180,3 +185,39 @@ This stack is the best balance of:
 - No full engine rewrite before data architecture lands
 
 These can be added later only if profiling proves they are needed.
+
+---
+
+## 9) Actual Stack (as implemented, 2026-02-22)
+
+### Runtime
+- **Bun** 1.3.x — runtime, package manager, test runner, bundler (Bun.build for --prod)
+
+### Client (`client/`)
+- **Vanilla JavaScript** — single `app.js` (~14,700 lines), no framework
+- **Canvas 2D API** — all game rendering (no WebGL)
+- **Tailwind CSS v4** via `@tailwindcss/cli` for UI overlays (login, settings, HUD)
+- No Vite, no React, no build step for JS (raw script tag, Bun.build only for --prod minification)
+- Asset loading: direct fetch to `/resourcesv2/` paths, browser Cache API for persistence
+
+### Server (`server/`)
+- **Raw `Bun.serve()`** — no Fastify, no Express
+- **Bun WebSocket** — built-in WS with per-message callbacks
+- **`bun:sqlite`** — character persistence, sessions, credentials, leaderboards
+- **bcrypt** via `Bun.password.hash/verify` — account claiming
+- Custom middleware: character-api.ts, pow.ts, map-data.ts, reactor-system.ts
+
+### Client Servers (`tools/dev/`)
+- **serve-client-offline.mjs** — static file server (Bun.serve)
+- **serve-client-online.mjs** — static files + API/WS proxy to game server
+  - `--prod` mode: JS minification (Bun.build), gzip pre-compression, ETag support
+
+### Packages
+- **`packages/shared-schemas/`** — workspace package (mostly scaffolding, zod schemas not heavily used)
+- **No external runtime dependencies** — zero npm packages in production
+
+### Tools
+- **`tools/build-assets/`** — WZ extraction scripts (Node.js, fs-based)
+- **`tools/workspace/`** — workspace integrity tests
+- **`tools/quality/`** — lint/typecheck helpers
+- **`tools/docs/`** — markdown docs server

@@ -85,6 +85,19 @@ Used by `POST /api/character/save`, `GET /api/character/load`, and localStorage.
 
 ## REST API
 
+### `GET /api/pow/challenge`
+- **No auth required**
+- **200:** `{ "ok": true, "challenge": "64-char hex string", "difficulty": 20 }`
+- Challenge expires after 60s. Max 10,000 pending.
+- Cache-Control: no-store
+
+### `POST /api/pow/verify`
+- **No auth required**
+- **Body:** `{ "challenge": "64-char hex", "nonce": "string (max 32 chars)" }`
+- **200:** `{ "ok": true, "session_id": "64-char hex" }`
+- **403:** `{ "ok": false, "error": "Challenge not found or already used" | "Challenge expired" | "Insufficient proof of work" }`
+- Server registers `session_id` in `valid_sessions` table on success.
+
 ### `GET /api/jq/leaderboard`
 - **No auth required**
 - **Query:** `?quest=Breath%20of%20Lava` (optional — omit for all quests)
@@ -121,15 +134,17 @@ Used by `POST /api/character/save`, `GET /api/character/load`, and localStorage.
 
 ### Connection Flow
 
-1. Client opens `ws://<server>/ws`
-2. Client sends auth message (must be first message):
+1. Client acquires `session_id` via PoW (`/api/pow/challenge` → solve → `/api/pow/verify`) or login (`/api/character/login`)
+2. Client opens `ws://<server>/ws`
+3. Client sends auth message (must be first message):
    ```json
-   { "type": "auth", "session_id": "<uuid>" }
+   { "type": "auth", "session_id": "<64-char hex or uuid>" }
    ```
-3. Server resolves `session_id → character_name` via `sessions` table, loads character by name
-4. If session not found or no character → close with code `4002`
-5. If valid → server adds client to map room, sends `map_state`, broadcasts `player_enter`
-6. Subsequent messages are game messages (see below)
+4. Server validates session exists in `valid_sessions` table and hasn't expired (7 days). If invalid → close `4007`.
+5. Server resolves `session_id → character_name` via `sessions` table, loads character by name
+6. If session has no character mapping → close `4002`. If already connected → close `4006`.
+7. If valid → registers client, sends `change_map`, waits for `map_loaded`, then sends `map_state` + broadcasts `player_enter`
+8. Subsequent messages are game messages (see below)
 
 ### PlayerLook (sub-object used in several messages)
 

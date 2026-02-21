@@ -30,6 +30,9 @@ bun run client:online
 
 # Or offline only (no server needed)
 bun run client:offline
+
+# Production mode (minified + gzipped assets)
+bun run client:online --prod
 ```
 
 ## GM Privileges
@@ -69,6 +72,9 @@ git lfs pull
 # Start the game server (port 5200) and client server (port 5173)
 bun run server          # Terminal 1
 bun run client:online   # Terminal 2
+
+# Production mode: minifies JS (Bun.build), gzips all assets at startup
+bun run client:online --prod
 ```
 
 ### Caddy reverse proxy config
