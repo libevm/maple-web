@@ -14,11 +14,13 @@
  *   ALLOWED_ORIGIN       (default "" — reflect request origin; set to lock down CORS)
  *   PROXY_TIMEOUT_MS     (default 10000)
  */
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
+import { gzipSync } from "node:zlib";
 
 /* ─── Config ──────────────────────────────────────────────────────────────── */
 
+const isProd = process.argv.includes("--prod");
 const host = process.env.CLIENT_WEB_HOST ?? "127.0.0.1";
 const requestedPort = Number(process.env.CLIENT_WEB_PORT ?? "5173");
 const gameServerUrl = process.env.GAME_SERVER_URL ?? "http://127.0.0.1:5200";
@@ -29,6 +31,85 @@ const repoRoot = normalize(join(import.meta.dir, "..", ".."));
 const webRoot = join(repoRoot, "client", "web");
 const resourcesRoot = join(repoRoot, "resources");
 const resourcesV2Root = join(repoRoot, "resourcesv2");
+
+/* ─── Production asset minification & gzip pre-compression ────────────────── */
+// In --prod mode, all client/web text assets are minified at startup and held
+// in memory.  Each entry stores the raw minified buffer AND a gzip-compressed
+// copy so the server can respond with Content-Encoding: gzip when accepted.
+
+/** @type {Map<string, { raw: Buffer, gzip: Buffer, contentType: string, etag: string }>} */
+const prodAssets = new Map();
+
+if (isProd) {
+  console.log("🔧 --prod: minifying client assets…");
+
+  // ── JS via Bun.build ──
+  const appJsPath = join(webRoot, "app.js");
+  const jsSrcSize = statSync(appJsPath).size;
+  const result = await Bun.build({
+    entrypoints: [appJsPath],
+    minify: true,
+    target: "browser",
+    format: "esm",
+  });
+  if (!result.success) {
+    console.error("❌ JS minification failed:");
+    for (const msg of result.logs) console.error("  ", msg);
+    process.exit(1);
+  }
+  const jsMin = Buffer.from(await result.outputs[0].text());
+  const jsGz = gzipSync(jsMin);
+  prodAssets.set("/app.js", {
+    raw: jsMin,
+    gzip: jsGz,
+    contentType: "application/javascript; charset=utf-8",
+    etag: `"p-${jsMin.length.toString(36)}"`,
+  });
+  console.log(`   app.js: ${(jsSrcSize / 1024).toFixed(0)} KB → ${(jsMin.length / 1024).toFixed(0)} KB min → ${(jsGz.length / 1024).toFixed(0)} KB gz`);
+
+  // ── CSS — already minified by tailwind, just gzip ──
+  const cssPath = join(webRoot, "styles.css");
+  if (existsSync(cssPath)) {
+    const cssRaw = readFileSync(cssPath);
+    const cssGz = gzipSync(cssRaw);
+    prodAssets.set("/styles.css", {
+      raw: cssRaw,
+      gzip: cssGz,
+      contentType: "text/css; charset=utf-8",
+      etag: `"p-${cssRaw.length.toString(36)}"`,
+    });
+    console.log(`   styles.css: ${(cssRaw.length / 1024).toFixed(0)} KB → ${(cssGz.length / 1024).toFixed(0)} KB gz`);
+  }
+
+  // ── HTML — inject online config + collapse whitespace ──
+  const htmlPath = join(webRoot, "index.html");
+  if (existsSync(htmlPath)) {
+    let html = readFileSync(htmlPath, "utf-8");
+    // Inject online mode config (same as dev path)
+    html = html.replace(
+      "</head>",
+      `<script>window.__MAPLE_ONLINE__ = true; window.__MAPLE_SERVER_URL__ = "";</script>\n</head>`
+    );
+    // Collapse runs of whitespace between tags
+    html = html.replace(/>\s+</g, "> <").replace(/\n\s*/g, "");
+    const htmlBuf = Buffer.from(html, "utf-8");
+    const htmlGz = gzipSync(htmlBuf);
+    const htmlAsset = {
+      raw: htmlBuf,
+      gzip: htmlGz,
+      contentType: "text/html; charset=utf-8",
+      etag: `"p-${htmlBuf.length.toString(36)}"`,
+    };
+    // Serve for both "/" and "/index.html"
+    prodAssets.set("/", htmlAsset);
+    prodAssets.set("/index.html", htmlAsset);
+    console.log(`   index.html: ${statSync(htmlPath).size} B → ${htmlBuf.length} B min → ${htmlGz.length} B gz`);
+  }
+
+  const totalRaw = [...prodAssets.values()].reduce((s, a) => s + a.raw.length, 0);
+  const totalGz = [...prodAssets.values()].reduce((s, a) => s + a.gzip.length, 0);
+  console.log(`✅ All assets ready: ${(totalRaw / 1024).toFixed(0)} KB raw, ${(totalGz / 1024).toFixed(0)} KB gzipped`);
+}
 
 /* ─── Security headers applied to every response ─────────────────────────── */
 
@@ -100,6 +181,10 @@ function safeJoin(base, relativePath) {
 /* ─── File serving ────────────────────────────────────────────────────────── */
 
 function serveFile(filePath, pathname, request) {
+  // In --prod mode, serve pre-minified + gzipped assets from memory
+  const prod = prodAssets.get(pathname);
+  if (prod) return serveProdAsset(prod, pathname, request);
+
   let stat;
   try {
     stat = statSync(filePath);
@@ -126,6 +211,28 @@ function serveFile(filePath, pathname, request) {
   applySecurityHeaders(headers);
 
   const body = readFileSync(filePath);
+  return new Response(body, { status: 200, headers });
+}
+
+function serveProdAsset(asset, pathname, request) {
+  const ifNoneMatch = request.headers.get("if-none-match");
+  if (ifNoneMatch && ifNoneMatch === asset.etag) {
+    const headers = new Headers({ etag: asset.etag });
+    applySecurityHeaders(headers);
+    return new Response(null, { status: 304, headers });
+  }
+
+  const acceptGzip = (request.headers.get("accept-encoding") ?? "").includes("gzip");
+  const body = acceptGzip ? asset.gzip : asset.raw;
+  const ext = extname(pathname).toLowerCase();
+  const headers = new Headers({
+    "content-type": asset.contentType,
+    "content-length": String(body.length),
+    "cache-control": getCacheControl(pathname, ext),
+    "etag": asset.etag,
+  });
+  if (acceptGzip) headers.set("content-encoding", "gzip");
+  applySecurityHeaders(headers);
   return new Response(body, { status: 200, headers });
 }
 
@@ -237,6 +344,11 @@ function handleRequest(request) {
 
   // index.html — inject online mode config
   if (pathname === "/") {
+    // In prod, serve from pre-minified + gzipped cache
+    if (prodAssets.has("/")) {
+      return serveProdAsset(prodAssets.get("/"), "/", request);
+    }
+
     const htmlPath = join(webRoot, "index.html");
     if (!existsSync(htmlPath)) return notFound();
 
@@ -384,7 +496,7 @@ function startServer(startPort, attempts = 10) {
 
 const server = startServer(requestedPort);
 console.log(`🍄 Schlop ONLINE client running at http://${host}:${server.port}`);
-console.log(`   Mode: online (game server: ${gameServerUrl})`);
+console.log(`   Mode: online${isProd ? " (PRODUCTION — minified + gzip)" : ""} (game server: ${gameServerUrl})`);
 console.log("   API proxy: /api/* → game server");
 console.log(`   WebSocket proxy: /ws → ${gameServerUrl.replace(/^http/, "ws")}/ws`);
 console.log(`   Proxy timeout: ${proxyTimeoutMs}ms`);

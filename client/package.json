@@ -13,7 +13,8 @@
     "css:watch": "bunx @tailwindcss/cli -i src/styles/app.css -o web/styles.css --watch",
     "web": "bun run css && bun run ../tools/dev/serve-client-offline.mjs",
     "offline": "bun run css && bun run ../tools/dev/serve-client-offline.mjs",
-    "online": "bun run css && bun run ../tools/dev/serve-client-online.mjs"
+    "online": "bun run css && bun run ../tools/dev/serve-client-online.mjs",
+    "online:prod": "bun run css && bun run ../tools/dev/serve-client-online.mjs --prod"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.2.0",
