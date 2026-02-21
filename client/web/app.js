@@ -7540,20 +7540,24 @@ function drawNpcDialogue() {
  * Word-wrap text to fit within maxWidth.
  */
 function wrapText(ctx, text, maxWidth) {
-  const words = text.split(/\s+/);
   const lines = [];
-  let currentLine = "";
-
-  for (const word of words) {
-    const testLine = currentLine ? currentLine + " " + word : word;
-    if (ctx.measureText(testLine).width > maxWidth && currentLine) {
-      lines.push(currentLine);
-      currentLine = word;
-    } else {
-      currentLine = testLine;
+  // Split on explicit newlines first, then word-wrap each paragraph
+  const paragraphs = text.split("\n");
+  for (const para of paragraphs) {
+    const words = para.split(/\s+/).filter(w => w.length > 0);
+    if (words.length === 0) { lines.push(""); continue; }
+    let currentLine = "";
+    for (const word of words) {
+      const testLine = currentLine ? currentLine + " " + word : word;
+      if (ctx.measureText(testLine).width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
     }
+    if (currentLine) lines.push(currentLine);
   }
-  if (currentLine) lines.push(currentLine);
   if (lines.length === 0) lines.push("");
   return lines;
 }
