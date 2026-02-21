@@ -589,8 +589,9 @@ Cap, FaceAcc, EyeAcc, Earrings, Pendant, Cape, Coat, Longcoat, Shield, Glove, Pa
 - **Kerning City Subway**: 103000902 (NPC 1052008), 103000905 (NPC 1052009), 103000909 (NPC 1052010)
 - **Forest of Patience**: 105040311 (NPC 1063000 `viola_pink`), 105040313 (NPC 1063001 `viola_blue`), 105040315 (NPC 1043000 `bush1`)
 - Validates player is on the correct map, not already transitioning
-- **Platform proximity check**: `requirePlatform: true` maps call `isOnSamePlatform()` from `map-data.ts`
-  - Finds NPC's foothold, builds connected chain at same Y, checks player is within chain ±50px X and ±60px Y
+- **Proximity check**: `requirePlatform: true` maps check Euclidean distance ≤200px between player and NPC
+  - Server uses `getNpcOnMap()` + `distance()` from `map-data.ts`
+  - Client pre-checks in `buildScriptDialogue()` before showing reward option
   - Rejection sends `jq_proximity` message → client shows random "come closer" phrase
 - `rollJqReward()` (reactor-system.ts): 50/50 equip or cash item, qty 1
 - Adds item to `client.inventory`, increments `client.achievements.jq_quests[questName]`

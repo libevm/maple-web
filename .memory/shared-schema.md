@@ -539,7 +539,7 @@ Sent when a drop has been on the ground for 180 seconds. Client fades it out ove
 ```json
 { "type": "jq_proximity", "npc_id": "1063000" }
 ```
-Sent when player requests `jq_reward` but server-side `isOnSamePlatform()` fails.
+Sent when player requests `jq_reward` but is >200px from the reward NPC.
 Only applies to `requirePlatform: true` JQ maps (Forest of Patience).
 Client shows a random "come closer" phrase in system chat.
 
