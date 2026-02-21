@@ -154,6 +154,22 @@ body:has(.canvas-wrapper.fixed-res) {
   margin: 0;
 }
 
+.settings-action-btn {
+  width: 100%;
+  padding: 8px 0;
+  background: rgba(60, 80, 120, 0.55);
+  color: #fff;
+  border: 1px solid rgba(80, 110, 160, 0.6);
+  border-radius: 4px;
+  font: bold 12px 'Dotum', Arial, sans-serif;
+  cursor: none;
+  transition: background 0.15s;
+  letter-spacing: 0.5px;
+}
+.settings-action-btn:hover {
+  background: rgba(70, 100, 150, 0.75);
+}
+
 .settings-logout-btn {
   width: 100%;
   padding: 8px 0;

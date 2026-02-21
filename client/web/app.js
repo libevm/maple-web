@@ -70,26 +70,54 @@ if (!ctx) {
 }
 ctx.imageSmoothingEnabled = false;
 
-// ---- Runtime log system ----
-const RLOG_MAX = 200;
-const runtimeLogs = [];
-function rlog(msg) {
+// ── Debug log system ────────────────────────────────────────────────
+// Ring buffer of last 5000 lines. No console output. Download via Settings.
+const DLOG_MAX = 5000;
+const _debugLogBuffer = [];
+let _debugLogDirty = false;
+
+function dlog(category, msg) {
   const ts = new Date().toLocaleTimeString("en-GB", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3 });
-  const line = `[${ts}] ${msg}`;
-  runtimeLogs.push(line);
-  if (runtimeLogs.length > RLOG_MAX) runtimeLogs.shift();
-  if (runtimeLogsEl) {
-    runtimeLogsEl.textContent = runtimeLogs.join("\n");
-    runtimeLogsEl.scrollTop = runtimeLogsEl.scrollHeight;
-  }
-  console.log(`[rlog] ${msg}`);
+  const line = `[${ts}] [${category}] ${msg}`;
+  _debugLogBuffer.push(line);
+  if (_debugLogBuffer.length > DLOG_MAX) _debugLogBuffer.shift();
+  _debugLogDirty = true;
 }
+
+/** Convenience: keeps old rlog(msg) signature working → routes to dlog("info", msg) */
+function rlog(msg) { dlog("info", msg); }
+
+// Flush debug log to the debug panel runtime logs element (throttled, called from render)
+let _lastLogFlush = 0;
+function flushDebugLogToPanel() {
+  if (!_debugLogDirty || !runtimeLogsEl) return;
+  const now = performance.now();
+  if (now - _lastLogFlush < 500) return; // throttle to 2Hz
+  _lastLogFlush = now;
+  _debugLogDirty = false;
+  // Show last 200 lines in the debug panel
+  const tail = _debugLogBuffer.slice(-200);
+  runtimeLogsEl.textContent = tail.join("\n");
+  runtimeLogsEl.scrollTop = runtimeLogsEl.scrollHeight;
+}
+
 if (clearRuntimeLogsEl) {
   clearRuntimeLogsEl.addEventListener("click", () => {
-    runtimeLogs.length = 0;
+    _debugLogBuffer.length = 0;
+    _debugLogDirty = false;
     if (runtimeLogsEl) runtimeLogsEl.textContent = "";
   });
 }
+
+// ── Capture global errors/warnings/rejections ──
+window.addEventListener("error", (e) => {
+  const loc = e.filename ? ` (${e.filename}:${e.lineno}:${e.colno})` : "";
+  dlog("error", `${e.message}${loc}`);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  const reason = e.reason instanceof Error ? `${e.reason.message}\n${e.reason.stack}` : String(e.reason);
+  dlog("error", `Unhandled rejection: ${reason}`);
+});
 if (copyRuntimeLogsEl) {
   copyRuntimeLogsEl.addEventListener("click", () => {
     const text = runtimeLogs.join("\n");
@@ -3981,7 +4009,7 @@ async function loadCursorAssets() {
     // Also preload UI sounds for click / open / close
     void preloadUISounds();
   } catch (e) {
-    console.warn("[ui] Failed to load cursor assets", e);
+    dlog("warn", "[ui] Failed to load cursor assets: " + (e.message || e));
   }
 }
 
@@ -4089,7 +4117,7 @@ async function preloadUISounds() {
       }
     } catch (e) { /* reactor sounds optional */ }
   } catch (e) {
-    console.warn("[ui] Failed to preload UI sounds", e);
+    dlog("warn", "[ui] Failed to preload UI sounds: " + (e.message || e));
   }
 }
 
@@ -5109,7 +5137,7 @@ function requestMeta(key, loader) {
             return meta;
           }
         } catch (error) {
-          console.warn("[asset-meta] failed", key, error);
+          dlog("warn", `[asset-meta] failed ${key}: ${error}`);
         } finally {
           metaPromiseCache.delete(key);
         }
@@ -5604,7 +5632,7 @@ async function loadDamageNumberSprites() {
     }
     dmgDigitsLoaded = true;
   } catch (e) {
-    console.warn("[dmg-sprites] Failed to load BasicEff digit sprites", e);
+    dlog("warn", "[dmg-sprites] Failed to load BasicEff digit sprites: " + (e.message || e));
   }
 }
 
@@ -12310,9 +12338,9 @@ async function loadSetEffects() {
       }
     }
     await Promise.all(decodePromises);
-    console.log(`[SetEff] Loaded ${_setEffectData.size} sets, decoded ${decoded} frames, failed ${failed}`);
+    dlog("info", `[SetEff] Loaded ${_setEffectData.size} sets, decoded ${decoded} frames, failed ${failed}`);
   } catch (e) {
-    console.warn(`[SetEff] Failed to load: ${e.message}`);
+    dlog("warn", `[SetEff] Failed to load: ${e.message}`);
   }
 }
 
@@ -13177,6 +13205,7 @@ function drawTransitionOverlay() {
 let _lastRenderState = "";
 function render() {
   resetFramePerfCounters();
+  flushDebugLogToPanel();
 
   ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
   ctx.fillStyle = "#000";
@@ -13469,7 +13498,7 @@ function tick(timestampMs) {
   } catch (err) {
     rlog(`TICK CRASH: ${err?.message ?? err}`);
     rlog(`TICK STACK: ${err?.stack ?? "N/A"}`);
-    console.error("[tick crash]", err);
+    dlog("error", "[tick crash] " + (err?.message || err) + "\n" + (err?.stack || ""));
   }
 
   requestAnimationFrame(tick);
@@ -13626,9 +13655,9 @@ async function playBgmPath(bgmPath) {
     if (error.name === "NotAllowedError") {
       // Browser autoplay blocked — clear bgmAudio so unlockAudio() can retry
       runtime.bgmAudio = null;
-      console.info("[audio] BGM blocked by autoplay policy, will retry on user gesture");
+      dlog("warn", "[audio] BGM blocked by autoplay policy, will retry on user gesture");
     } else {
-      console.warn("[audio] bgm failed", error);
+      dlog("warn", `[audio] bgm failed: ${error}`);
     }
   }
 }
@@ -13678,7 +13707,7 @@ async function playSfx(soundFile, soundName) {
       audio.play().catch(() => {});
     }
   } catch (error) {
-    console.warn("[audio] sfx failed", soundFile, soundName, error);
+    dlog("warn", `[audio] sfx failed: ${soundFile} ${soundName} ${error}`);
   }
 }
 
@@ -13731,7 +13760,7 @@ async function playMobSfx(mobId, soundType) {
       const audio = getSfxFromPool(dataUri);
       if (audio) { audio.volume = 0.45; audio.play().catch(() => {}); }
     } catch (e2) {
-      console.warn("[audio] mob sfx fallback failed", soundName, e2);
+      dlog("warn", `[audio] mob sfx fallback failed: ${soundName} ${e2}`);
     }
   }
 }
@@ -14557,6 +14586,29 @@ claimConfirmBtn?.addEventListener("click", async () => {
     if (claimErrorEl) claimErrorEl.textContent = "Server error — try again";
     if (claimConfirmBtn) claimConfirmBtn.disabled = false;
   }
+});
+
+// Download debug logs button
+const settingsDownloadLogsBtn = document.getElementById("settings-download-logs");
+settingsDownloadLogsBtn?.addEventListener("click", () => {
+  const header = [
+    `MapleWeb Debug Log`,
+    `Exported: ${new Date().toISOString()}`,
+    `UserAgent: ${navigator.userAgent}`,
+    `Screen: ${screen.width}x${screen.height} Canvas: ${canvasEl?.width}x${canvasEl?.height}`,
+    `Online: ${!!window.__MAPLE_ONLINE__} Connected: ${_wsConnected} Ping: ${_wsPingMs}ms`,
+    `Map: ${runtime.mapId || "none"} Player: ${runtime.player?.name || "none"}`,
+    `Lines: ${_debugLogBuffer.length}`,
+    `${"─".repeat(60)}`,
+  ];
+  const content = header.join("\n") + "\n" + _debugLogBuffer.join("\n") + "\n";
+  const blob = new Blob([content], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `mapleweb-debug-${Date.now()}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
 });
 
 // Logout button
