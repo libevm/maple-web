@@ -514,8 +514,8 @@ Manually curated files (`resourcesv2/mob/`, `resourcesv2/sound/`) remain tracked
 ## Server-Authoritative Reactor System
 
 - **`server/src/reactor-system.ts`** — standalone module for reactor state, hit validation, respawn, loot.
-- Map 100000001 has 5 destroyable boxes (**reactor 0002001**, 64×45 wooden box).
-- 4 on grass ground at x=-400, 200, 600, 1000 (y=252, foothold 274); 1 on platform (x=60, y=16, foothold 38).
+- Map 100000001 has 6 destroyable boxes (**reactor 0002001**, 64×45 wooden box).
+- 5 on grass ground at x=-400, 200, 600, 1000, 1500 (y=252, foothold 274); 1 on platform (x=60, y=16, foothold 38).
 - Reactor y = footholdY - (spriteHeight - originY) so sprite bottom sits on foothold.
 - **4 hits to destroy** (REACTOR_MAX_HP=4). Each hit advances WZ state.
 - **600ms global cooldown** between hits on the same reactor (shared across all players).

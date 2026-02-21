@@ -125,8 +125,8 @@ Used by `POST /api/character/save`, `GET /api/character/load`, and localStorage.
    ```json
    { "type": "auth", "session_id": "<uuid>" }
    ```
-3. Server validates session, loads character from DB
-4. If no character → close with code `4002`
+3. Server resolves `session_id → character_name` via `sessions` table, loads character by name
+4. If session not found or no character → close with code `4002`
 5. If valid → server adds client to map room, sends `map_state`, broadcasts `player_enter`
 6. Subsequent messages are game messages (see below)
 
@@ -633,7 +633,7 @@ pendingSpawnPortal: string — portal name on pending map
 
 #### Auth flow:
 1. Client sends `auth { session_id }`
-2. Server loads character save, creates WSClient with `mapId=""`
+2. Server resolves session → character name, loads character save, creates WSClient with `mapId=""`
 3. Server calls `registerClient()` — adds to allClients but NOT to any room
 4. Server calls `initiateMapChange()` — sends `change_map { map_id, spawn_portal }`
 5. Client loads map, sends `map_loaded`
