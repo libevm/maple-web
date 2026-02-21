@@ -2363,8 +2363,8 @@ function getRemoteCharacterFrameData(rp) {
         if (z === "hair" || z === "hairOverHead" || z === "hairShade" || z === "hairBelowBody") continue;
       } else {
         if (rpCapType === "FULLCOVER") {
-          if (z === "hairOverHead" || z === "backHair") continue;
-          if (layerName === "hairOverHead" || layerName === "backHair") continue;
+          // Hide ALL hair layers (cap covers everything)
+          continue;
         } else if (rpCapType === "HALFCOVER") {
           if (z === "hairOverHead" || layerName === "hairOverHead") continue;
           if (z === "backHair" || layerName === "backHair") continue;
@@ -2438,6 +2438,9 @@ function drawRemotePlayer(rp) {
   // but have their own equipment data (remoteEquipData).
   const template = getRemotePlayerPlacementTemplate(rp, action, frameIndex, flipped, faceExpression, faceFrameIndex);
   if (!template || template.length === 0) return;
+
+  // Draw equip glow effect behind remote player (e.g. Zakum Helmet aura)
+  drawRemoteEquipGlowEffect(rp);
 
   for (const part of template) {
     const worldX = rp.renderX + part.offsetX;
@@ -11932,6 +11935,9 @@ function drawCharacter() {
     }
   }
 
+  // Draw equip glow effect behind character (e.g. Zakum Helmet aura)
+  drawEquipGlowEffect(player.x, player.y, bounds, flipped);
+
   const blinkColorScale = playerHitBlinkColorScale(performance.now());
   if (blinkColorScale < 0.999) {
     ctx.save();
@@ -11945,6 +11951,93 @@ function drawCharacter() {
   if (blinkColorScale < 0.999) {
     ctx.restore();
   }
+}
+
+// ─── Equip Glow Effect (Zakum Helmet, leveled items) ────────────────
+
+/** Item IDs that show a glow aura behind the character. */
+const EQUIP_GLOW_IDS = new Set([1002357]); // Zakum Helmet
+
+/**
+ * Check if any equipped item should show a glow effect.
+ * Returns the glow item ID or 0.
+ */
+function getLocalEquipGlowId() {
+  for (const [, eq] of playerEquipped) {
+    if (EQUIP_GLOW_IDS.has(eq.id)) return eq.id;
+  }
+  return 0;
+}
+
+function getRemoteEquipGlowId(rp) {
+  for (const eq of rp.look?.equipment || []) {
+    if (EQUIP_GLOW_IDS.has(eq.item_id)) return eq.item_id;
+  }
+  return 0;
+}
+
+/**
+ * Draw a pulsing golden aura behind the character (Zakum Helmet effect).
+ * Rendered as a radial gradient with animated opacity and size.
+ */
+function drawEquipGlowEffect(worldX, worldY, bounds, flipped) {
+  if (!getLocalEquipGlowId()) return;
+  const sc = worldToScreen(worldX, worldY);
+  const cx = Math.round(sc.x);
+  const cy = Math.round(sc.y - (bounds ? bounds.height * 0.5 : 30));
+  _drawGlowAura(cx, cy);
+}
+
+function drawRemoteEquipGlowEffect(rp) {
+  if (!getRemoteEquipGlowId(rp)) return;
+  const sc = worldToScreen(rp.renderX, rp.renderY);
+  const cx = Math.round(sc.x);
+  const cy = Math.round(sc.y - 30);
+  _drawGlowAura(cx, cy);
+}
+
+function _drawGlowAura(cx, cy) {
+  const t = performance.now() / 1000;
+  // Pulsing radius and opacity
+  const pulse = 0.85 + 0.15 * Math.sin(t * 2.5);
+  const outerR = Math.round(48 * pulse);
+  const alpha = 0.22 + 0.08 * Math.sin(t * 3.0);
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+
+  // Outer golden glow
+  const g1 = ctx.createRadialGradient(cx, cy, 0, cx, cy, outerR);
+  g1.addColorStop(0, `rgba(255, 220, 100, ${(alpha * 0.9).toFixed(3)})`);
+  g1.addColorStop(0.4, `rgba(255, 200, 60, ${(alpha * 0.5).toFixed(3)})`);
+  g1.addColorStop(0.7, `rgba(255, 180, 40, ${(alpha * 0.25).toFixed(3)})`);
+  g1.addColorStop(1, "rgba(255, 160, 20, 0)");
+  ctx.fillStyle = g1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, outerR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Inner white-gold core
+  const innerR = Math.round(22 * pulse);
+  const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, innerR);
+  g2.addColorStop(0, `rgba(255, 255, 220, ${(alpha * 1.2).toFixed(3)})`);
+  g2.addColorStop(0.5, `rgba(255, 230, 140, ${(alpha * 0.6).toFixed(3)})`);
+  g2.addColorStop(1, "rgba(255, 200, 80, 0)");
+  ctx.fillStyle = g2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, innerR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Ring outline (concentric circle)
+  const ringR = Math.round(36 * pulse);
+  const ringAlpha = 0.12 + 0.06 * Math.sin(t * 2.0 + 1.0);
+  ctx.strokeStyle = `rgba(255, 210, 80, ${ringAlpha.toFixed(3)})`;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.restore();
 }
 
 function drawChatBubble() {
