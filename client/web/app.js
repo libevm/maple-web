@@ -12039,17 +12039,24 @@ async function loadSetEffects() {
       if (frames.length === 0) continue;
       _setEffectData.set(setId, { items, frames });
     }
-    // Pre-decode all set effect images
+    // Pre-decode set effect images — batch to avoid flooding decoder
+    let decoded = 0, failed = 0;
+    const decodePromises = [];
     for (const [, setEff] of _setEffectData) {
       for (const frame of setEff.frames) {
         if (frame.basedata) {
           const img = new Image();
           img.src = "data:image/png;base64," + frame.basedata;
-          img.decode().then(() => { imageCache.set(frame.key, img); }).catch(() => {});
+          const key = frame.key;
+          decodePromises.push(
+            img.decode().then(() => { imageCache.set(key, img); decoded++; })
+                        .catch((e) => { failed++; rlog(`[SetEff] decode fail: ${key} ${e}`); })
+          );
         }
       }
     }
-    rlog(`[SetEff] Loaded ${_setEffectData.size} set effects`);
+    await Promise.all(decodePromises);
+    rlog(`[SetEff] Loaded ${_setEffectData.size} sets, decoded ${decoded} frames, failed ${failed}`);
   } catch (e) {
     rlog(`[SetEff] Failed to load: ${e.message}`);
   }
