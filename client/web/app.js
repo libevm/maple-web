@@ -93,6 +93,7 @@ async function cachedFetch(url) {
   const resolvedUrl = (useV2Resources && url.startsWith("/resources/"))
     ? url.replace("/resources/", "/resourcesv2/")
     : url;
+  if (url !== resolvedUrl) console.log(`[fetch] V2 rewrite: ${url} → ${resolvedUrl}`);
   const cache = await getResourceCache();
   if (cache) {
     const cached = await cache.match(resolvedUrl);
@@ -104,12 +105,15 @@ async function cachedFetch(url) {
   }
   // If V2 fails (404), fall back to /resources/ (graceful degradation)
   if (!response.ok && useV2Resources && resolvedUrl !== url) {
+    console.warn(`[fetch] V2 failed (${response.status}): ${resolvedUrl} — falling back to ${url}`);
     const fallback = await fetch(url);
+    if (!fallback.ok) console.error(`[fetch] Fallback also failed (${fallback.status}): ${url}`);
     if (fallback.ok && cache) {
       try { await cache.put(url, fallback.clone()); } catch {}
     }
     return fallback;
   }
+  if (!response.ok) console.warn(`[fetch] Failed (${response.status}): ${resolvedUrl}`);
   return response;
 }
 
@@ -4913,6 +4917,7 @@ async function fetchJson(path) {
         const response = await cachedFetch(path);
         if (!response.ok) {
           const msg = `Failed to load JSON ${path} (${response.status})`;
+          console.error(`[fetchJson] FAIL: ${msg} (resolved URL may differ due to V2 rewrite)`);
           rlog(`fetchJson FAIL: ${msg}`);
           throw new Error(msg);
         }
@@ -13686,6 +13691,8 @@ async function loadMap(mapId, spawnPortalName = null, spawnFromPortalTransfer = 
     }
     rlog(`loadMap COMPLETE mapId=${runtime.mapId}`);
   } catch (error) {
+    console.error(`[loadMap] ERROR:`, error);
+    console.error(`[loadMap] Stack:`, error instanceof Error ? error.stack : "N/A");
     rlog(`loadMap ERROR: ${error instanceof Error ? error.message : String(error)}`);
     rlog(`loadMap ERROR stack: ${error instanceof Error ? error.stack : "N/A"}`);
     if (loadToken === runtime.mapLoadToken) {
