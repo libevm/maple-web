@@ -20,7 +20,7 @@ const debugLifeToggleEl = document.getElementById("debug-life-toggle");
 const debugTilesToggleEl = document.getElementById("debug-tiles-toggle");
 const debugHitboxesToggleEl = document.getElementById("debug-hitboxes-toggle");
 const debugUISlotsToggleEl = document.getElementById("debug-uislots-toggle");
-const debugFpsToggleEl = document.getElementById("debug-fps-toggle");
+
 const debugMouseFlyToggleEl = document.getElementById("debug-mousefly-toggle");
 const statSpeedInputEl = document.getElementById("stat-speed-input");
 const statJumpInputEl = document.getElementById("stat-jump-input");
@@ -395,7 +395,7 @@ const runtime = {
     showTiles: false,
     showLifeMarkers: true,
     showHitboxes: false,
-    showFps: true,
+
 
     mouseFly: false,
   },
@@ -4272,9 +4272,7 @@ function syncDebugTogglesFromUi() {
     }
   }
 
-  if (debugFpsToggleEl) {
-    runtime.debug.showFps = !!debugFpsToggleEl.checked;
-  }
+
 
   if (debugMouseFlyToggleEl) {
     runtime.debug.mouseFly = !!debugMouseFlyToggleEl.checked;
@@ -13180,72 +13178,8 @@ function drawTransitionOverlay() {
   ctx.restore();
 }
 
-function estimatedFps() {
-  if (runtime.perf.sampleCount <= 0) return 0;
-  const p50Ms = perfPercentile(0.5);
-  if (!Number.isFinite(p50Ms) || p50Ms <= 0.001) return 0;
-  return Math.round(1000 / p50Ms);
-}
 
-function drawFpsCounter() {
-  if (!runtime.debug.showFps) return;
 
-  const fps = estimatedFps();
-  const loopMs = Number.isFinite(runtime.perf.loopIntervalMs) ? runtime.perf.loopIntervalMs : 0;
-  const fpsText = fps > 0 ? `${fps} FPS` : "FPS --";
-  const msText = loopMs > 0 ? `${loopMs.toFixed(1)}ms` : "--.-ms";
-  const hasPing = _wsConnected && _wsPingMs >= 0;
-  const pingText = hasPing ? `${_wsPingMs}ms ping` : "";
-
-  ctx.save();
-  ctx.font = "bold 11px 'Dotum', Arial, sans-serif";
-  ctx.textAlign = "right";
-  ctx.textBaseline = "top";
-
-  const lines = [fpsText, msText];
-  if (hasPing) lines.push(pingText);
-  const lineHeight = 13;
-
-  const maxLineWidth = Math.max(...lines.map(l => ctx.measureText(l).width));
-  const padX = 8;
-  const boxW = Math.ceil(maxLineWidth) + padX * 2;
-  const boxH = lines.length * lineHeight + 6;
-
-  const buttonsBlockLeftX = canvasEl.width - 88;
-  const boxRight = buttonsBlockLeftX - 8;
-  const boxX = Math.max(10, Math.round(boxRight - boxW));
-  const boxY = 42;
-
-  // Frosted glass background
-  roundRect(ctx, boxX, boxY, boxW, boxH, 5);
-  ctx.fillStyle = "rgba(6, 10, 24, 0.7)";
-  ctx.fill();
-  ctx.strokeStyle = "rgba(100, 130, 180, 0.18)";
-  ctx.lineWidth = 0.5;
-  ctx.stroke();
-
-  ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
-  ctx.shadowOffsetY = 1;
-  ctx.shadowBlur = 2;
-
-  // FPS line
-  ctx.fillStyle = fps >= 58 ? "#22c55e" : fps >= 45 ? "#fbbf24" : "#ef4444";
-  ctx.fillText(fpsText, boxX + boxW - padX, boxY + 3);
-
-  // Frame time line
-  ctx.font = "10px 'Dotum', Arial, sans-serif";
-  ctx.fillStyle = "#8899b0";
-  ctx.fillText(msText, boxX + boxW - padX, boxY + 3 + lineHeight);
-
-  // Ping line
-  if (hasPing) {
-    ctx.fillStyle = _wsPingMs <= 80 ? "#22c55e" : _wsPingMs <= 200 ? "#fbbf24" : "#ef4444";
-    ctx.fillText(pingText, boxX + boxW - padX, boxY + 3 + lineHeight * 2);
-  }
-
-  ctx.shadowColor = "transparent";
-  ctx.restore();
-}
 
 let _lastRenderState = "";
 function render() {
@@ -13263,13 +13197,11 @@ function render() {
 
   if (runtime.loading.active) {
     drawLoadingScreen();
-    drawFpsCounter();
     return;
   }
 
   if (!runtime.map) {
     drawTransitionOverlay();
-    drawFpsCounter();
     return;
   }
 
@@ -13307,7 +13239,6 @@ function render() {
   drawMapBanner();
   drawMinimap();
   drawNpcDialogue();
-  drawFpsCounter();
   drawTransitionOverlay();
   drawWZCursor();
 }
@@ -13403,7 +13334,6 @@ function updateSummary() {
       showTiles: runtime.debug.showTiles,
       showLifeMarkers: runtime.debug.showLifeMarkers,
       showHitboxes: runtime.debug.showHitboxes,
-      showFps: runtime.debug.showFps,
       transitionAlpha: Number(runtime.transition.alpha.toFixed(3)),
       portalWarpInProgress: runtime.portalWarpInProgress,
       npcDialogue: runtime.npcDialogue.active ? `${runtime.npcDialogue.npcName} (${runtime.npcDialogue.lineIndex + 1}/${runtime.npcDialogue.lines.length})` : "none",
