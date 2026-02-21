@@ -101,6 +101,14 @@ function equipWzCategoryFromId(id) {
 | 149 | Gun | ❌ | from WZ info |
 | 170 | Cash | ❌ | from WZ info |
 
+### Cash Weapon Rendering (Prefix 170)
+- Cash weapons (e.g. MapleGirl Wand, 170xxxx) have stances nested under numeric weapon-type groups
+- Group IDs = weapon type prefix − 100: `"30"`=1H Sword(130), `"37"`=Wand(137), `"38"`=Staff(138), etc.
+- `resolveCashWeaponData(data, cashWeaponId)`: picks group matching player's actual weapon type, falls back to `"30"`
+- Merges info node + group stances into flat structure for rendering pipeline
+- `resolveCashWeaponDataForRemote(data, cashWeaponId, equipment)`: same for remote players
+- Applied in `loadEquipWzData()` (local) and `loadRemotePlayerEquipData()` (remote)
+
 ### Stance Adjustment (`adjustStanceForWeapon`)
 
 C++ `CharEquips::adjust_stance`: when a weapon is equipped, stand1/walk1 may be
