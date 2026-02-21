@@ -9,8 +9,13 @@
     "lint": "bun run ../tools/quality/lint-package.mjs .",
     "typecheck": "bun run ../tools/quality/typecheck-package.mjs .",
     "debug:phase6": "bun run src/runtime/phase6-debug-smoke.ts",
-    "web": "bun run ../tools/dev/serve-client-offline.mjs",
-    "offline": "bun run ../tools/dev/serve-client-offline.mjs",
-    "online": "bun run ../tools/dev/serve-client-online.mjs"
+    "css": "bunx @tailwindcss/cli -i src/styles/app.css -o web/styles.css --minify",
+    "css:watch": "bunx @tailwindcss/cli -i src/styles/app.css -o web/styles.css --watch",
+    "web": "bun run css && bun run ../tools/dev/serve-client-offline.mjs",
+    "offline": "bun run css && bun run ../tools/dev/serve-client-offline.mjs",
+    "online": "bun run css && bun run ../tools/dev/serve-client-online.mjs"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.2.0"
   }
 }

@@ -9,23 +9,47 @@
 ## Client Modes
 
 ### Offline (`bun run client:offline`)
-- Static file server only — no game server dependency
-- All state local: in-memory + localStorage
+- Builds CSS via Tailwind CLI then starts static file server
+- No game server dependency — all state local: in-memory + localStorage
 - Serves `client/web/`, `/resources/`, `/resourcesv2/`
 - Default port: 5173
 - File: `tools/dev/serve-client-offline.mjs`
 
 ### Online (`bun run client:online`)
-- Static file server + API proxy to game server
+- Builds CSS via Tailwind CLI then starts hardened static file server + API proxy
+- Designed to run behind Caddy (or similar reverse proxy) for TLS + compression
 - Injects `window.__MAPLE_ONLINE__ = true` and `window.__MAPLE_SERVER_URL__` into HTML
 - Proxies `/api/*` requests to game server (default `http://127.0.0.1:5200`)
 - Client detects online mode via `window.__MAPLE_ONLINE__` flag
 - WebSocket: client connects directly to game server URL
-- Env: `GAME_SERVER_URL` (default `http://127.0.0.1:5200`)
 - File: `tools/dev/serve-client-online.mjs`
+- Env vars:
+  - `CLIENT_WEB_HOST` (default `127.0.0.1`)
+  - `CLIENT_WEB_PORT` (default `5173`)
+  - `GAME_SERVER_URL` (default `http://127.0.0.1:5200`)
+  - `ALLOWED_ORIGIN` (default `""` — reflects request origin; set to lock down CORS)
+  - `PROXY_TIMEOUT_MS` (default `10000`)
+- Production hardening:
+  - Security headers on all responses (X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy, COOP)
+  - ETag support with 304 Not Modified for conditional requests
+  - Cache-control: HTML=no-cache, JS/CSS=1h revalidate, game resources=7d immutable
+  - Method allowlist: static routes GET/HEAD only, API routes allow all methods
+  - CORS preflight handling with configurable origin
+  - Proxy timeout with 504 Gateway Timeout on slow game server
+  - Directory listing removed (no longer exposes file trees)
+  - Path traversal hardened (null byte rejection, normalize check)
+  - No stack traces in error responses
 
 ### Legacy (`bun run client:web`)
 - Alias for `client:offline` (backward compatible)
+
+### Tailwind CSS Build Pipeline
+- Source: `client/src/styles/app.css` — Tailwind v4 imports (theme + utilities, no preflight) + all custom CSS
+- Output: `client/web/styles.css` — built by `@tailwindcss/cli`, minified
+- `@source` directives scan `client/web/index.html` and `client/web/app.js` for class usage
+- Scripts: `bun run --cwd client css` (one-shot), `bun run --cwd client css:watch` (dev)
+- `web`, `offline`, `online` scripts auto-build CSS before starting server
+- CDN `<script src="https://cdn.tailwindcss.com">` removed from index.html
 
 ---
 

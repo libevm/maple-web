@@ -52,6 +52,10 @@ Why: Bun keeps runtime/tooling simple and fast; Vitest remains the most practica
 ## B) Client (`client/`)
 
 - **Vite + TypeScript** (keep; already used)
+- **Tailwind CSS v4** via `@tailwindcss/cli` (devDependency)
+  - Source: `client/src/styles/app.css` (theme + utilities, no preflight)
+  - Output: `client/web/styles.css` (minified)
+  - Build: `bun run --cwd client css` / `css:watch`
 - Keep current Canvas gameplay architecture initially; refactor incrementally
 - Add a dedicated API loader layer replacing direct WZ path fetching
 

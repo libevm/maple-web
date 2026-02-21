@@ -1,0 +1,1015 @@
+/* Tailwind CSS v4 — import theme + utilities (skip preflight to preserve custom resets) */
+@import "tailwindcss/theme" layer(theme);
+@import "tailwindcss/utilities" layer(utilities);
+
+/* Scan HTML and JS sources for Tailwind class usage */
+@source "../../web/index.html";
+@source "../../web/app.js";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, sans-serif;
+  background: #000;
+  color: #e5e7eb;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* ── Fullscreen canvas wrapper ── */
+.canvas-wrapper {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#map-canvas {
+  display: block;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  background: #000;
+}
+
+/* ── Fixed resolution display mode (1440×1080) ── */
+body:has(.canvas-wrapper.fixed-res) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.canvas-wrapper.fixed-res {
+  width: var(--fixed-w);
+  height: var(--fixed-h);
+  overflow: hidden;
+}
+
+.canvas-wrapper.fixed-res #map-canvas {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  image-rendering: auto;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   HUD BUTTONS — frosted glass maple-style buttons (top-right)
+   ══════════════════════════════════════════════════════════════════════════════ */
+.hud-button {
+  position: absolute;
+  top: 10px;
+  z-index: 50;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(10, 15, 30, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: rgba(255, 255, 255, 0.65);
+  cursor: none;
+  padding: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.hud-button:hover {
+  background: rgba(10, 15, 30, 0.75);
+  border-color: rgba(251, 191, 36, 0.5);
+  color: #fbbf24;
+}
+
+.hud-button.hud-hidden {
+  display: none;
+}
+
+.hud-tooltip {
+  position: absolute;
+  z-index: 99990;
+  pointer-events: none;
+  display: none;
+  padding: 5px 10px;
+  border-radius: 4px;
+  background: rgba(10, 14, 28, 0.85);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.85);
+  font: 400 12px -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: none;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   SETTINGS WINDOW
+   ══════════════════════════════════════════════════════════════════════════════ */
+.settings-body {
+  padding: 6px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+  font-family: "Dotum", "Arial", sans-serif;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-group-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #4a6490;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-bottom: 1px;
+  border-bottom: 1px solid #b0bdd0;
+  margin-bottom: 2px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #2a3650;
+  cursor: none;
+  padding: 2px 0;
+}
+
+.settings-row input[type="checkbox"] {
+  min-width: auto;
+  width: 14px;
+  height: 14px;
+  accent-color: #4a6490;
+  cursor: none;
+  margin: 0;
+}
+
+.settings-action-btn {
+  width: 100%;
+  padding: 8px 0;
+  background: rgba(60, 80, 120, 0.55);
+  color: #fff;
+  border: 1px solid rgba(80, 110, 160, 0.6);
+  border-radius: 4px;
+  font: bold 12px 'Dotum', Arial, sans-serif;
+  cursor: none;
+  transition: background 0.15s;
+  letter-spacing: 0.5px;
+}
+.settings-action-btn:hover {
+  background: rgba(70, 100, 150, 0.75);
+}
+
+.settings-logout-btn {
+  width: 100%;
+  padding: 8px 0;
+  background: rgba(200, 55, 55, 0.55);
+  color: #fff;
+  border: 1px solid rgba(220, 80, 80, 0.6);
+  border-radius: 4px;
+  font: bold 12px 'Dotum', Arial, sans-serif;
+  cursor: none;
+  transition: background 0.15s;
+  letter-spacing: 0.5px;
+}
+.settings-logout-btn:hover {
+  background: rgba(220, 55, 55, 0.75);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   MODAL OVERLAYS — maple HUD–style modals (claim account, logout, etc.)
+   ══════════════════════════════════════════════════════════════════════════════ */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99980;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  cursor: none;
+}
+.modal-overlay *, .modal-overlay button,
+.modal-overlay input { cursor: none; }
+.modal-overlay.hidden { display: none; }
+
+.modal-panel {
+  min-width: 280px;
+  max-width: 340px;
+  background: linear-gradient(180deg, #d8dfe9 0%, #c4ceda 100%);
+  border: 1px solid #7a8da8;
+  border-radius: 5px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  font-family: "Dotum", "Arial", sans-serif;
+  overflow: hidden;
+}
+
+.modal-titlebar {
+  display: flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  background: linear-gradient(180deg, #5a7298 0%, #3d5a80 100%);
+  border-bottom: 1px solid #2c4262;
+  border-radius: 4px 4px 0 0;
+}
+
+.modal-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  letter-spacing: 0.03em;
+}
+
+.modal-body {
+  padding: 16px 20px 14px;
+}
+
+.modal-desc {
+  font-size: 12px;
+  color: #2a3650;
+  line-height: 1.5;
+  margin-bottom: 14px;
+  text-align: center;
+}
+
+.modal-field {
+  margin-bottom: 10px;
+}
+
+.modal-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  color: #4a6490;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.modal-input {
+  width: 100%;
+  padding: 6px 8px;
+  font: 12px 'Dotum', Arial, sans-serif;
+  color: #1a2a40;
+  background: #fff;
+  border: 1px solid #8a9bb5;
+  border-radius: 3px;
+  outline: none;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.modal-input:focus {
+  border-color: #5a7298;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08), 0 0 0 2px rgba(90, 114, 152, 0.2);
+}
+.modal-input::placeholder { color: #9aa8bc; }
+
+.modal-error {
+  font-size: 11px;
+  color: #c03030;
+  min-height: 16px;
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.modal-btn {
+  padding: 6px 18px;
+  font: bold 11px 'Dotum', Arial, sans-serif;
+  border-radius: 3px;
+  cursor: none;
+  border: 1px solid;
+  transition: background 0.12s, border-color 0.12s;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.3) inset;
+}
+
+.modal-btn-ok {
+  background: linear-gradient(180deg, #6aad5a 0%, #4d8e3c 100%);
+  border-color: #3a7a2e;
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
+}
+.modal-btn-ok:hover {
+  background: linear-gradient(180deg, #78c066 0%, #5aa048 100%);
+  border-color: #448832;
+}
+
+.modal-btn-danger {
+  background: linear-gradient(180deg, #c85050 0%, #a83838 100%);
+  border-color: #8a2828;
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
+}
+.modal-btn-danger:hover {
+  background: linear-gradient(180deg, #d86060 0%, #b84444 100%);
+  border-color: #9a3030;
+}
+
+.modal-btn-cancel {
+  background: linear-gradient(180deg, #eef1f6 0%, #d8dee8 100%);
+  border-color: #8a9bb5;
+  color: #2a3650;
+}
+.modal-btn-cancel:hover {
+  background: linear-gradient(180deg, #f4f6fa 0%, #e0e6f0 100%);
+  border-color: #6080b0;
+}
+
+.settings-btn {
+  width: 100%;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: "Dotum", "Arial", sans-serif;
+  border: 1px solid #8a9bb5;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #eef1f6, #d8dee8);
+  color: #2a3650;
+  cursor: none;
+  font-weight: 600;
+}
+
+.settings-btn:hover {
+  background: linear-gradient(180deg, #f4f6fa, #e0e6f0);
+  border-color: #6080b0;
+}
+
+@keyframes keybind-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   CHAT BAR — bottom text input (MapleStory-style)
+   ══════════════════════════════════════════════════════════════════════════════ */
+.chat-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  background: linear-gradient(180deg, rgba(10, 15, 30, 0.92), rgba(6, 10, 22, 0.96));
+  border-top: 1px solid rgba(100, 120, 160, 0.2);
+  z-index: 20;
+}
+
+.chat-bar.inactive input {
+  opacity: 0.4;
+  cursor: none;
+  caret-color: transparent;
+}
+
+.chat-bar input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 10px;
+  border: 1px solid rgba(100, 120, 160, 0.35);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #000;
+  font-size: 12px;
+  font-family: "Dotum", "Arial", sans-serif;
+  outline: none;
+}
+
+.chat-bar input:focus {
+  border-color: rgba(251, 191, 36, 0.6);
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.2);
+}
+
+.chat-bar input::placeholder {
+  color: rgba(0, 0, 0, 0.35);
+  font-size: 11px;
+}
+
+/* ── Pickup Journal (right-aligned above chat bar) ── */
+.pickup-journal {
+  position: absolute;
+  bottom: 34px;
+  right: 10px;
+  z-index: 16;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  pointer-events: none;
+  max-width: 280px;
+}
+
+.pickup-journal-entry {
+  font-size: 11px;
+  font-family: "Dotum", "Arial", sans-serif;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+  padding: 1px 0;
+  opacity: 1;
+  transition: opacity 1s ease-out;
+}
+
+.pickup-journal-entry.fading {
+  opacity: 0;
+}
+
+/* ── Chat log (history overlay — floats above chat bar, doesn't affect canvas size) ── */
+.chat-log {
+  position: absolute;
+  bottom: 34px;
+  left: 0;
+  right: 0;
+  height: 140px;
+  min-height: 14px;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── Chat log resize handle (always at top of chat log) ── */
+.chat-log-handle {
+  flex-shrink: 0;
+  height: 14px;
+  cursor: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.04);
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+.chat-log-handle:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.chat-log-handle-slit {
+  display: block;
+  width: 16px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.chat-log-messages {
+  overflow-y: auto;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-log-messages::-webkit-scrollbar {
+  width: 4px;
+}
+
+.chat-log-messages::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
+
+.chat-msg {
+  font-size: 12px;
+  line-height: 1.35;
+  color: #fff;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+  word-break: break-word;
+}
+
+.chat-msg .chat-msg-name {
+  font-weight: normal;
+  color: inherit;
+}
+
+.chat-msg-system {
+  color: #9ca3af;
+  font-style: italic;
+}
+.chat-msg-system.chat-msg-welcome {
+  color: #fbbf24;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   GAME WINDOWS — MapleStory-style UI windows (Equipment, Inventory, etc.)
+   Faithful to the original warm parchment/blue-gray palette with modern polish
+   ══════════════════════════════════════════════════════════════════════════════ */
+.game-window {
+  position: absolute;
+  z-index: 25;
+  user-select: none;
+  -webkit-user-select: none;
+  background: linear-gradient(180deg, #d8dfe9 0%, #c4ceda 100%);
+  border: 1px solid #7a8da8;
+  border-radius: 5px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  font-family: "Dotum", "Arial", sans-serif;
+  cursor: none;
+}
+
+.game-window.hidden {
+  display: none;
+}
+
+.game-window-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 22px;
+  padding: 0 4px 0 8px;
+  background: linear-gradient(180deg, #5a7298 0%, #3d5a80 100%);
+  border-bottom: 1px solid #2c4262;
+  border-radius: 4px 4px 0 0;
+  cursor: none;
+}
+
+.game-window-titlebar:active {
+  cursor: none;
+}
+
+.game-window-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  letter-spacing: 0.03em;
+}
+
+.game-window-close {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  border-radius: 3px;
+  background: linear-gradient(180deg, #e8e8e8, #b8b8b8);
+  color: #444;
+  font-size: 11px;
+  font-weight: bold;
+  line-height: 1;
+  cursor: none;
+  padding: 0;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.3) inset;
+}
+
+.game-window-close:hover {
+  background: linear-gradient(180deg, #fff, #d8d8d8);
+  color: #c00;
+  border-color: rgba(0, 0, 0, 0.4);
+}
+
+/* ── Equip grid ── */
+.equip-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 36px);
+  gap: 2px;
+  padding: 6px;
+}
+
+/* ── Inventory tabs (MapleStory-style tab strip) ── */
+.inv-tabs {
+  display: flex;
+  padding: 3px 4px 0;
+  gap: 1px;
+  background: linear-gradient(180deg, #b0bace 0%, #a0aec0 100%);
+  border-bottom: 1px solid #8a9bb5;
+}
+
+.inv-tab {
+  flex: 1;
+  padding: 3px 0 2px;
+  font-size: 9px;
+  font-family: "Dotum", "Arial", sans-serif;
+  font-weight: 600;
+  color: #506070;
+  background: linear-gradient(180deg, #c0c8d4 0%, #b0b8c8 100%);
+  border: 1px solid #8a9bb5;
+  border-bottom: none;
+  border-radius: 3px 3px 0 0;
+  cursor: none;
+  text-align: center;
+  line-height: 1.2;
+  transition: background 0.1s, color 0.1s;
+}
+
+.inv-tab:hover {
+  background: linear-gradient(180deg, #d8dfe8 0%, #c4ccd8 100%);
+  color: #2a3a50;
+}
+
+.inv-tab.active {
+  background: linear-gradient(180deg, #e0e6ee 0%, #d4dbe4 100%);
+  color: #1a2a40;
+  font-weight: 700;
+  border-bottom: 1px solid #d4dbe4;
+  position: relative;
+  top: 1px;
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.3) inset;
+}
+
+/* ── Inventory grid ── */
+.inv-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 36px);
+  gap: 2px;
+  padding: 6px;
+}
+
+/* ── Item slot (MapleStory parchment style with modern subtlety) ── */
+.item-slot {
+  width: 36px;
+  height: 36px;
+  border: 1px solid #98a8bc;
+  border-radius: 2px;
+  background: linear-gradient(135deg, #e8ecf2 0%, #dce2ea 50%, #d4dae4 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  cursor: none;
+  transition: border-color 0.1s, box-shadow 0.1s;
+}
+
+.item-slot:hover {
+  background: linear-gradient(135deg, #f2f5fa 0%, #e4eaf2 50%, #dce4f0 100%);
+  border-color: #6888b8;
+  box-shadow: 0 0 0 1px rgba(104, 136, 184, 0.3);
+}
+
+.item-slot.empty {
+  background: linear-gradient(135deg, #d6dce6 0%, #ccd4e0 50%, #c4ccda 100%);
+  border-color: #a4b2c4;
+}
+
+.item-slot img {
+  max-width: 32px;
+  max-height: 32px;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.item-slot .slot-label {
+  font-size: 8px;
+  color: #8898b0;
+  text-align: center;
+  line-height: 1.1;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.item-slot .slot-qty {
+  position: absolute;
+  bottom: 1px;
+  right: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 0 3px #000, 0 1px 1px #000;
+  pointer-events: none;
+}
+
+/* ── Keybinds grid ── */
+.keybinds-grid {
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 200px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.keybinds-grid .kb-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.keybinds-grid .kb-label {
+  font-size: 11px;
+  color: #2a3650;
+  white-space: nowrap;
+}
+
+.keybinds-grid .keybind-btn {
+  min-width: 56px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-family: monospace;
+  text-align: center;
+  border: 1px solid #8a9bb5;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #eef1f6, #d8dee8);
+  color: #2a3650;
+  cursor: none;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.3) inset;
+}
+
+.keybinds-grid .keybind-btn:hover {
+  background: linear-gradient(180deg, #f4f6fa, #e0e6f0);
+  border-color: #6080b0;
+}
+
+.keybinds-grid .keybind-btn.listening {
+  border-color: #d4a020;
+  background: #fff8e0;
+  color: #8a6800;
+  animation: keybind-pulse 0.8s infinite;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   TOOLTIP — MapleStory item info popup
+   ══════════════════════════════════════════════════════════════════════════════ */
+.ui-tooltip {
+  position: absolute;
+  z-index: 99990;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: rgba(10, 14, 28, 0.8);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  color: #fff;
+  font-size: 11px;
+  font-family: "Dotum", "Arial", sans-serif;
+  line-height: 1.4;
+  white-space: pre-line;
+  pointer-events: none;
+  min-width: 80px;
+  max-width: 180px;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: none;
+}
+
+.ui-tooltip.hidden {
+  display: none;
+}
+
+/* ── Debug: show slot boundaries ── */
+.game-window.debug-slots .item-slot {
+  outline: 1px solid rgba(255, 0, 0, 0.6);
+}
+
+.game-window.debug-slots .item-slot:nth-child(even) {
+  outline-color: rgba(0, 0, 255, 0.6);
+}
+
+/* ── Character Creation Overlay ────────────────────────────────── */
+.character-create-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 8, 18, 0.92);
+  cursor: none;
+}
+.character-create-overlay *, .character-create-overlay button,
+.character-create-overlay input { cursor: none; }
+.character-create-overlay.hidden {
+  display: none;
+}
+.character-create-panel {
+  width: 340px;
+  padding: 28px 32px 24px;
+  background: rgba(16, 20, 32, 0.95);
+  border: 1px solid rgba(200, 170, 100, 0.25);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  backdrop-filter: blur(12px);
+  font-family: "Dotum", Arial, sans-serif;
+  color: #e8e0d4;
+}
+.character-create-header {
+  text-align: center;
+  font-size: 17px;
+  font-weight: 700;
+  color: #d4b96a;
+  margin-bottom: 22px;
+  letter-spacing: 0.5px;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+}
+.character-create-field {
+  margin-bottom: 16px;
+}
+.character-create-label {
+  display: block;
+  font-size: 11px;
+  color: rgba(232,224,212,0.6);
+  margin-bottom: 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+.character-create-input {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: "Dotum", Arial, sans-serif;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(200,170,100,0.2);
+  border-radius: 5px;
+  color: #e8e0d4;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+.character-create-input:focus {
+  border-color: rgba(200,170,100,0.5);
+}
+.character-create-error {
+  font-size: 11px;
+  color: #e85d5d;
+  min-height: 16px;
+  margin-top: 4px;
+}
+.character-create-gender-row {
+  display: flex;
+  gap: 8px;
+}
+.character-create-gender-btn {
+  flex: 1;
+  padding: 7px 0;
+  font-size: 12px;
+  font-family: "Dotum", Arial, sans-serif;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(200,170,100,0.18);
+  border-radius: 5px;
+  color: rgba(232,224,212,0.55);
+  cursor: none;
+  transition: all 0.15s;
+}
+.character-create-gender-btn:hover {
+  background: rgba(200,170,100,0.08);
+  color: rgba(232,224,212,0.8);
+}
+.character-create-gender-btn.active {
+  background: rgba(200,170,100,0.15);
+  border-color: rgba(200,170,100,0.45);
+  color: #d4b96a;
+  font-weight: 600;
+}
+.character-create-submit {
+  display: block;
+  width: 100%;
+  padding: 10px 0;
+  margin-top: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: "Dotum", Arial, sans-serif;
+  background: linear-gradient(180deg, #c9a94e 0%, #a88832 100%);
+  border: 1px solid rgba(200,170,100,0.4);
+  border-radius: 6px;
+  color: #1a1408;
+  cursor: none;
+  transition: opacity 0.15s;
+  letter-spacing: 0.3px;
+}
+.character-create-submit:disabled {
+  opacity: 0.35;
+  cursor: none;
+}
+.character-create-submit:not(:disabled):hover {
+  opacity: 0.9;
+}
+
+/* Auth tabs (Login / Create Character) */
+.auth-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 20px;
+  border-bottom: 1px solid rgba(200,170,100,0.2);
+}
+.auth-tab {
+  flex: 1;
+  padding: 8px 0;
+  font: 12px 'Dotum', Arial, sans-serif;
+  color: rgba(232,224,212,0.45);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: none;
+  transition: all 0.15s;
+  letter-spacing: 0.3px;
+}
+.auth-tab:hover { color: rgba(232,224,212,0.7); }
+.auth-tab.active {
+  color: #d4b96a;
+  border-bottom-color: #d4b96a;
+  font-weight: 600;
+}
+.auth-view.hidden { display: none; }
+.auth-hint {
+  margin-top: 14px;
+  font-size: 11px;
+  color: rgba(232,224,212,0.4);
+  text-align: center;
+  line-height: 1.4;
+}
+.auth-hint strong { color: rgba(232,224,212,0.6); }
+
+/* Claim account HUD button — attention-grabbing pulse */
+@keyframes claim-pulse {
+  0%, 100% {
+    box-shadow: 0 0 6px rgba(251, 191, 36, 0.5), 0 0 14px rgba(251, 191, 36, 0.2);
+    border-color: rgba(251, 191, 36, 0.6);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 14px rgba(251, 191, 36, 0.8), 0 0 28px rgba(251, 191, 36, 0.35), 0 0 40px rgba(251, 191, 36, 0.12);
+    border-color: rgba(251, 191, 36, 0.9);
+    transform: scale(1.08);
+  }
+}
+@keyframes badge-bounce {
+  0%, 100% { transform: translate(30%, -30%) scale(1); }
+  50% { transform: translate(30%, -30%) scale(1.2); }
+}
+.claim-hud-glow:not(.hud-hidden) {
+  animation: claim-pulse 1.5s ease-in-out infinite;
+  border-color: rgba(251, 191, 36, 0.6) !important;
+  color: #fbbf24 !important;
+  background: rgba(40, 30, 0, 0.7) !important;
+}
+.claim-hud-glow:not(.hud-hidden):hover {
+  background: rgba(60, 45, 0, 0.85) !important;
+  color: #fde68a !important;
+  border-color: #fbbf24 !important;
+}
+/* Notification badge */
+.claim-hud-glow:not(.hud-hidden)::after {
+  content: "!";
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 16px;
+  height: 16px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: "Dotum", "Arial", sans-serif;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 50%;
+  border: 1.5px solid rgba(0,0,0,0.3);
+  animation: badge-bounce 1.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ── Ping HUD ───────────────────────────────────── */
+#ping-window {
+  min-width: 90px;
+}
+.ping-body {
+  padding: 4px 10px 6px;
+}
+.ping-display {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: bold 12px 'Dotum', Arial, sans-serif;
+  color: #2c3e50;
+  white-space: nowrap;
+}
+.ping-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #555;
+  flex-shrink: 0;
+}
+.ping-indicator.ping-good { background: #22c55e; box-shadow: 0 0 4px #22c55e88; }
+.ping-indicator.ping-mid  { background: #fbbf24; box-shadow: 0 0 4px #fbbf2488; }
+.ping-indicator.ping-bad  { background: #ef4444; box-shadow: 0 0 4px #ef444488; }
+.ping-indicator.ping-off  { background: #555; }
