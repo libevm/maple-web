@@ -2439,9 +2439,6 @@ function drawRemotePlayer(rp) {
   const template = getRemotePlayerPlacementTemplate(rp, action, frameIndex, flipped, faceExpression, faceFrameIndex);
   if (!template || template.length === 0) return;
 
-  // Draw equip glow effect behind remote player (e.g. Zakum Helmet aura)
-  drawRemoteEquipGlowEffect(rp);
-
   for (const part of template) {
     const worldX = rp.renderX + part.offsetX;
     const worldY = rp.renderY + part.offsetY;
@@ -11935,9 +11932,6 @@ function drawCharacter() {
     }
   }
 
-  // Draw equip glow effect behind character (e.g. Zakum Helmet aura)
-  drawEquipGlowEffect(player.x, player.y, bounds, flipped);
-
   const blinkColorScale = playerHitBlinkColorScale(performance.now());
   if (blinkColorScale < 0.999) {
     ctx.save();
@@ -11951,116 +11945,6 @@ function drawCharacter() {
   if (blinkColorScale < 0.999) {
     ctx.restore();
   }
-}
-
-// ─── Equip Glow Effect (Zakum Helmet, leveled items) ────────────────
-
-/** Item IDs that show a glow aura behind the character. */
-const EQUIP_GLOW_IDS = new Set([1002357]); // Zakum Helmet
-
-/**
- * Check if any equipped item should show a glow effect.
- * Returns the glow item ID or 0.
- */
-function getLocalEquipGlowId() {
-  for (const [, eq] of playerEquipped) {
-    if (EQUIP_GLOW_IDS.has(eq.id)) return eq.id;
-  }
-  return 0;
-}
-
-function getRemoteEquipGlowId(rp) {
-  for (const eq of rp.look?.equipment || []) {
-    if (EQUIP_GLOW_IDS.has(eq.item_id)) return eq.item_id;
-  }
-  return 0;
-}
-
-/**
- * Draw a pulsing golden aura behind the character (Zakum Helmet effect).
- * Rendered as a radial gradient with animated opacity and size.
- */
-function drawEquipGlowEffect(worldX, worldY, bounds, flipped) {
-  if (!getLocalEquipGlowId()) return;
-  const sc = worldToScreen(worldX, worldY);
-  const cx = Math.round(sc.x);
-  const cy = Math.round(sc.y - (bounds ? bounds.height * 0.5 : 30));
-  _drawGlowAura(cx, cy);
-}
-
-function drawRemoteEquipGlowEffect(rp) {
-  if (!getRemoteEquipGlowId(rp)) return;
-  const sc = worldToScreen(rp.renderX, rp.renderY);
-  const cx = Math.round(sc.x);
-  const cy = Math.round(sc.y - 30);
-  _drawGlowAura(cx, cy);
-}
-
-function _drawGlowAura(cx, cy) {
-  const t = performance.now() / 1000;
-  const pulse = 0.9 + 0.1 * Math.sin(t * 2.0);
-  const rotation = t * 0.4; // slow rotation for the ring pattern
-
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-
-  // Vertical oval scaling (taller than wide, like the reference)
-  const scaleX = 1.0;
-  const scaleY = 1.3;
-
-  // Outer soft glow (large, faint)
-  const outerR = Math.round(52 * pulse);
-  const outerAlpha = 0.12 + 0.04 * Math.sin(t * 2.5);
-  const g1 = ctx.createRadialGradient(cx, cy, 0, cx, cy, outerR);
-  g1.addColorStop(0, `rgba(180, 230, 255, ${(outerAlpha * 0.8).toFixed(3)})`);
-  g1.addColorStop(0.3, `rgba(200, 210, 140, ${(outerAlpha * 0.5).toFixed(3)})`);
-  g1.addColorStop(0.6, `rgba(180, 200, 100, ${(outerAlpha * 0.2).toFixed(3)})`);
-  g1.addColorStop(1, "rgba(150, 180, 80, 0)");
-  ctx.fillStyle = g1;
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, outerR * scaleX, outerR * scaleY, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Mid-ring glow (golden)
-  const midR = Math.round(36 * pulse);
-  const midAlpha = 0.18 + 0.06 * Math.sin(t * 3.0);
-  const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, midR);
-  g2.addColorStop(0, `rgba(255, 255, 230, ${(midAlpha * 1.0).toFixed(3)})`);
-  g2.addColorStop(0.4, `rgba(255, 220, 140, ${(midAlpha * 0.6).toFixed(3)})`);
-  g2.addColorStop(0.8, `rgba(220, 190, 90, ${(midAlpha * 0.2).toFixed(3)})`);
-  g2.addColorStop(1, "rgba(200, 170, 60, 0)");
-  ctx.fillStyle = g2;
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, midR * scaleX, midR * scaleY, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Inner bright core (white-cyan)
-  const innerR = Math.round(16 * pulse);
-  const innerAlpha = 0.25 + 0.08 * Math.sin(t * 3.5);
-  const g3 = ctx.createRadialGradient(cx, cy, 0, cx, cy, innerR);
-  g3.addColorStop(0, `rgba(255, 255, 255, ${(innerAlpha * 1.2).toFixed(3)})`);
-  g3.addColorStop(0.5, `rgba(220, 240, 255, ${(innerAlpha * 0.7).toFixed(3)})`);
-  g3.addColorStop(1, "rgba(180, 220, 255, 0)");
-  ctx.fillStyle = g3;
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, innerR * scaleX, innerR * scaleY, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Concentric ring lines (rotating slowly)
-  ctx.translate(cx, cy);
-  ctx.rotate(rotation);
-  for (let i = 0; i < 3; i++) {
-    const ringR = (22 + i * 12) * pulse;
-    const ringAlpha = (0.10 - i * 0.025) + 0.04 * Math.sin(t * 2.0 + i * 1.2);
-    if (ringAlpha <= 0) continue;
-    ctx.strokeStyle = `rgba(230, 210, 140, ${ringAlpha.toFixed(3)})`;
-    ctx.lineWidth = 1.0;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, ringR * scaleX, ringR * scaleY, 0, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-
-  ctx.restore();
 }
 
 function drawChatBubble() {
