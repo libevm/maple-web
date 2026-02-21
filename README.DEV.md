@@ -53,7 +53,25 @@ GM characters can use slash commands in the chat box:
 
 ## Production
 
-Caddy reverse proxy config
+### Server setup
+
+```bash
+git clone <repo>
+cd shlop-app
+bun install
+
+# IMPORTANT: resource files are stored in Git LFS
+# Without this step the game serves LFS pointer files instead of JSON
+# and the client shows a blank screen after login
+git lfs install
+git lfs pull
+
+# Start the game server (port 5200) and client server (port 5173)
+bun run server          # Terminal 1
+bun run client:online   # Terminal 2
+```
+
+### Caddy reverse proxy config
 
 ```
 {
