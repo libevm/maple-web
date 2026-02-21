@@ -6,7 +6,7 @@
 - Do **not** duplicate long-form specs in this file.
 
 ## Project References (READ ONLY)
-- Web port (TS/JS): `/home/k/Development/Libevm/MapleWeb`  
+- Web port (TS/JS): `/home/k/Development/Libevm/MapleWeb` (legacy reference)  
 - C++ reference client: `/home/k/Development/Libevm/MapleStory-Client`
 - Project assets are located in: `./resources/` and `./resourcesv2/`
 - These two referenced codebases are **READ ONLY**.

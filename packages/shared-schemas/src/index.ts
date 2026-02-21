@@ -1,6 +1,6 @@
 /**
  * @maple/shared-schemas — Canonical asset entity types, ID normalization,
- * section schemas, and API contracts for the MapleWeb project.
+ * section schemas, and API contracts for the Schlop project.
  *
  * This is the single source of truth for data contracts shared across
  * client, server, and build-assets pipeline.

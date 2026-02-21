@@ -203,12 +203,12 @@ const STATUSBAR_BAR_HEIGHT = 14;
 const STATUSBAR_PADDING_H = 10;
 
 // ─── Persistence Keys ─────────────────────────────────────────────────────────
-const SETTINGS_CACHE_KEY = "mapleweb.settings.v1";
-const CHAT_LOG_HEIGHT_CACHE_KEY = "mapleweb.debug.chatLogHeight.v1";
-const CHAT_LOG_COLLAPSED_KEY = "mapleweb.chatLogCollapsed.v1";
-const KEYBINDS_STORAGE_KEY = "mapleweb.keybinds.v1";
-const SESSION_KEY = "mapleweb.session";
-const CHARACTER_SAVE_KEY = "mapleweb.character.v1";
+const SETTINGS_CACHE_KEY = "schlop.settings.v1";
+const CHAT_LOG_HEIGHT_CACHE_KEY = "schlop.debug.chatLogHeight.v1";
+const CHAT_LOG_COLLAPSED_KEY = "schlop.chatLogCollapsed.v1";
+const KEYBINDS_STORAGE_KEY = "schlop.keybinds.v1";
+const SESSION_KEY = "schlop.session";
+const CHARACTER_SAVE_KEY = "schlop.character.v1";
 
 // ─── Session ID ───────────────────────────────────────────────────────────────
 function getOrCreateSessionId() {
@@ -311,7 +311,7 @@ const runtime = {
     attackFrameIndex: 0,
     attackFrameTimer: 0,
     attackCooldownUntil: 0,
-    name: "MapleWeb",
+    name: "Schlop",
     gender: false,
     face_id: 20000,
     hair_id: 30000,
@@ -1023,7 +1023,7 @@ function buildCharacterSave() {
 function applyCharacterSave(save) {
   const p = runtime.player;
   // Identity
-  p.name = save.identity?.name || save.name || p.name || "MapleWeb";
+  p.name = save.identity?.name || save.name || p.name || "Schlop";
   p.gender = save.identity.gender ?? false;
   p.face_id = save.identity.face_id || (p.gender ? 21000 : 20000);
   p.hair_id = save.identity.hair_id || (p.gender ? 31000 : 30000);
@@ -1210,9 +1210,9 @@ function showDuplicateLoginOverlay() {
     localStorage.removeItem(SESSION_KEY);
     localStorage.removeItem(CHARACTER_SAVE_KEY);
     localStorage.removeItem("maple_session_id"); // legacy key
-    localStorage.removeItem("mapleweb.save.v1");
-    localStorage.removeItem("mapleweb.settings.v1");
-    localStorage.removeItem("mapleweb.keybinds.v1");
+    localStorage.removeItem("schlop.save.v1");
+    localStorage.removeItem("schlop.settings.v1");
+    localStorage.removeItem("schlop.keybinds.v1");
     window.location.reload();
   });
 }
@@ -1226,7 +1226,7 @@ function showCharacterCreateOverlay() {
     const femaleBtn = document.getElementById("gender-female");
     const submitBtn = document.getElementById("character-create-submit");
     if (!overlay || !nameInput || !submitBtn) {
-      resolve({ name: "MapleWeb", gender: false, loggedIn: false });
+      resolve({ name: "Schlop", gender: false, loggedIn: false });
       return;
     }
 
@@ -14213,7 +14213,7 @@ claimConfirmBtn?.addEventListener("click", async () => {
 const settingsDownloadLogsBtn = document.getElementById("settings-download-logs");
 settingsDownloadLogsBtn?.addEventListener("click", () => {
   const header = [
-    `MapleWeb Debug Log`,
+    `Schlop Debug Log`,
     `Exported: ${new Date().toISOString()}`,
     `UserAgent: ${navigator.userAgent}`,
     `Screen: ${screen.width}x${screen.height} Canvas: ${canvasEl?.width}x${canvasEl?.height}`,
@@ -14227,7 +14227,7 @@ settingsDownloadLogsBtn?.addEventListener("click", () => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `mapleweb-debug-${Date.now()}.txt`;
+  a.download = `schlop-debug-${Date.now()}.txt`;
   a.click();
   URL.revokeObjectURL(url);
 });
