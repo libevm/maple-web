@@ -11954,6 +11954,9 @@ function drawCharacter() {
   // Draw set effect behind character (e.g. Zakum Helmet glow)
   const localEquipIds = [...playerEquipped.values()].map(e => e.id);
   const localSetEff = findActiveSetEffect(localEquipIds);
+  if (!_setEffDebugLogged && localEquipIds.length > 0) {
+    rlog(`[SetEff] equips=${JSON.stringify(localEquipIds)} setLoaded=${_setEffectsLoaded} dataSize=${_setEffectData.size} match=${!!localSetEff}`);
+  }
   if (localSetEff && !_localSetEffect.active) {
     _localSetEffect.active = true;
     _localSetEffect.frameIndex = 0;
