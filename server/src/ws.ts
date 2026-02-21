@@ -17,7 +17,7 @@ import {
   distance,
   isNpcOnMap,
   isValidNpcDestination,
-  isOnSamePlatform,
+  getNpcOnMap,
   PORTAL_RANGE_PX,
 } from "./map-data.ts";
 import {
@@ -845,11 +845,15 @@ export function handleClientMessage(
         break;
       }
 
-      // Platform check — player must be on the same foothold platform as the NPC
+      // Proximity check — player must be within 200px of the NPC
       if (jqInfo.requirePlatform) {
-        if (!isOnSamePlatform(client.mapId, jqInfo.npcId, client.x, client.y)) {
-          sendDirect(client, { type: "jq_proximity", npc_id: jqInfo.npcId });
-          break;
+        const npc = getNpcOnMap(client.mapId, jqInfo.npcId);
+        if (npc) {
+          const dist = distance(client.x, client.y, npc.x, npc.cy);
+          if (dist > 200) {
+            sendDirect(client, { type: "jq_proximity", npc_id: jqInfo.npcId });
+            break;
+          }
         }
       }
 

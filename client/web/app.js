@@ -5602,6 +5602,7 @@ async function requestJqReward() {
     return;
   }
   // Online — server handles reward + warp
+  rlog(`[JQ] Sending jq_reward request, mapId=${runtime.mapId}, wsConnected=${_wsConnected}`);
   wsSend({ type: "jq_reward" });
   // Response handled in WS message handler (jq_reward → chat msg + change_map follows)
 }
@@ -5610,14 +5611,16 @@ async function requestJqReward() {
  * Build dialogue lines from an NPC script definition.
  * npcId is the NPC's WZ ID (e.g. "1012000"), sent to server for validation.
  */
-function buildScriptDialogue(scriptDef, npcId, npcWorldY) {
+function buildScriptDialogue(scriptDef, npcId, npcWorldX, npcWorldY) {
   const lines = [];
   // JQ reward NPC: check platform proximity first if required
   if (scriptDef.jqReward) {
     // Client-side proximity check (server validates authoritatively too)
     if (scriptDef.requirePlatform && typeof npcWorldY === "number") {
-      const dy = Math.abs(runtime.player.y - npcWorldY);
-      if (dy > 60) {
+      const dx = runtime.player.x - (typeof npcWorldX === "number" ? npcWorldX : runtime.player.x);
+      const dy = runtime.player.y - npcWorldY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 200) {
         const PROXIMITY_PHRASES = [
           "Come closer... I can barely see you from way over there!",
           "Hey! You need to come up here if you want your reward!",
@@ -6938,7 +6941,7 @@ function openNpcDialogue(npcResult) {
   let lines;
   if (scriptDef) {
     // Known script — use specific handler
-    lines = buildScriptDialogue(scriptDef, npcWzId, npcY);
+    lines = buildScriptDialogue(scriptDef, npcWzId, npcX, npcY);
   } else if (anim.scriptId) {
     // Has a script but no explicit handler — show flavor text + travel options
     lines = buildFallbackScriptDialogue(anim.name, npcWzId, anim.dialogue);
