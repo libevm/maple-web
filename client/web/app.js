@@ -14554,12 +14554,8 @@ window.addEventListener("beforeunload", () => {
   // ── Obtain a valid session via proof-of-work if needed (online only) ──
   if (window.__MAPLE_ONLINE__ && !sessionId) {
     console.log("[boot] No session — performing proof-of-work…");
-    try {
-      sessionId = await obtainSessionViaPow();
-      localStorage.setItem(SESSION_KEY, sessionId);
-    } catch (e) {
-      console.error("[boot] PoW failed:", e);
-    }
+    sessionId = await obtainSessionViaPow();
+    localStorage.setItem(SESSION_KEY, sessionId);
   }
 
   let savedCharacter;
@@ -14573,18 +14569,14 @@ window.addEventListener("beforeunload", () => {
 
   // If the server rejected our session (expired/invalid), get a new one via PoW
   if (window.__MAPLE_ONLINE__ && !savedCharacter && sessionId) {
-    try {
-      const checkResp = await fetch("/api/character/claimed", {
-        headers: { "Authorization": "Bearer " + sessionId },
-      });
-      if (checkResp.status === 401) {
-        console.log("[boot] Session rejected by server — performing proof-of-work…");
-        localStorage.removeItem(SESSION_KEY);
-        sessionId = await obtainSessionViaPow();
-        localStorage.setItem(SESSION_KEY, sessionId);
-      }
-    } catch (e) {
-      console.warn("[boot] Session check failed:", e);
+    const checkResp = await fetch("/api/character/claimed", {
+      headers: { "Authorization": "Bearer " + sessionId },
+    });
+    if (checkResp.status === 401) {
+      console.log("[boot] Session rejected by server — performing proof-of-work…");
+      localStorage.removeItem(SESSION_KEY);
+      sessionId = await obtainSessionViaPow();
+      localStorage.setItem(SESSION_KEY, sessionId);
     }
   }
 
