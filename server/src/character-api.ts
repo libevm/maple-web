@@ -25,6 +25,7 @@ import {
   claimAccount,
   loginAccount,
 } from "./db.ts";
+import { isSessionValid, touchSession, registerSession } from "./pow.ts";
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -88,6 +89,15 @@ export async function handleCharacterRequest(
       401,
     );
   }
+
+  // Validate the session was server-issued and hasn't expired (7-day inactivity)
+  if (!isSessionValid(db, sessionId)) {
+    return jsonResponse(
+      { ok: false, error: { code: "SESSION_EXPIRED", message: "Session invalid or expired — please refresh to get a new session" } },
+      401,
+    );
+  }
+  touchSession(db, sessionId);
 
   // Resolve session → character name (null for new sessions)
   const characterName = resolveSession(db, sessionId);

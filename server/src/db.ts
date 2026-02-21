@@ -378,8 +378,10 @@ export async function loginAccount(
   if (!valid) {
     return { ok: false, reason: "invalid_credentials" };
   }
-  // Generate a new session_id for this login
+  // Generate a new session_id for this login and register it as valid
+  const { registerSession } = await import("./pow.ts");
   const newSessionId = crypto.randomUUID();
+  registerSession(db, newSessionId);
   createSession(db, newSessionId, name);
   return { ok: true, session_id: newSessionId };
 }

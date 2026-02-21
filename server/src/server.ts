@@ -17,6 +17,7 @@
 
 import { initDatabase, resolveSession, loadCharacterData, isGm, getJqLeaderboard, getAllJqLeaderboards } from "./db.ts";
 import { handleCharacterRequest } from "./character-api.ts";
+import { handlePowRequest, initPowTable, isSessionValid, touchSession, purgeExpiredSessions } from "./pow.ts";
 import { RoomManager, handleClientMessage, setDebugMode, setDatabase, persistClientState } from "./ws.ts";
 import type { WSClient, WSClientData } from "./ws.ts";
 import type { Database } from "bun:sqlite";
@@ -319,6 +320,12 @@ function routeRequest(
     });
   }
 
+  // Proof-of-Work session endpoint
+  if (db && path.startsWith("/api/pow/")) {
+    const powResp = handlePowRequest(request, url, db);
+    if (powResp) return powResp;
+  }
+
   // Character API (separate middleware)
   if (db && path.startsWith("/api/character/")) {
     return handleCharacterRequest(request, url, db, roomManager).then((resp) => {
@@ -417,6 +424,16 @@ export function createServer(
   function start() {
     // Initialize character database if dbPath is configured
     const db: Database | null = cfg.dbPath ? initDatabase(cfg.dbPath) : null;
+
+    // Initialize PoW session table and start periodic cleanup
+    if (db) {
+      initPowTable(db);
+      // Purge expired sessions every hour
+      setInterval(() => {
+        const purged = purgeExpiredSessions(db);
+        if (purged > 0) console.log(`[pow] Purged ${purged} expired sessions`);
+      }, 60 * 60 * 1000);
+    }
 
     // Set debug mode for WS handler (controls admin_warp access)
     setDebugMode(cfg.debug);
@@ -520,6 +537,13 @@ export function createServer(
               ws.close(4005, "No database configured");
               return;
             }
+
+            // Validate session is server-issued and not expired
+            if (!isSessionValid(db, sessionId)) {
+              ws.close(4007, "Session invalid or expired");
+              return;
+            }
+            touchSession(db, sessionId);
 
             // Resolve session → character name
             const characterName = resolveSession(db, sessionId);

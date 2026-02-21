@@ -217,16 +217,76 @@ const KEYBINDS_STORAGE_KEY = "schlop.keybinds.v1";
 const SESSION_KEY = "schlop.session";
 const CHARACTER_SAVE_KEY = "schlop.character.v1";
 
-// ─── Session ID ───────────────────────────────────────────────────────────────
-function getOrCreateSessionId() {
-  let id = localStorage.getItem(SESSION_KEY);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(SESSION_KEY, id);
+// ─── Session ID (server-issued via proof-of-work) ─────────────────────────────
+let sessionId = localStorage.getItem(SESSION_KEY) || "";
+
+/**
+ * Solve a SHA-256 proof-of-work challenge.
+ * Finds a nonce such that SHA-256(challenge + nonce) has `difficulty` leading zero bits.
+ * Runs in a tight loop using crypto.subtle for hashing.
+ */
+async function solvePoW(challenge, difficulty) {
+  console.log(`[pow] Solving challenge (${difficulty} bits)…`);
+  const t0 = performance.now();
+  const encoder = new TextEncoder();
+  const challengeBytes = encoder.encode(challenge);
+  const fullBytes = Math.floor(difficulty / 8);
+  const remainBits = difficulty % 8;
+  const mask = remainBits > 0 ? (0xff << (8 - remainBits)) & 0xff : 0;
+
+  // Process in batches to avoid blocking the UI thread
+  const BATCH = 50000;
+  let nonce = 0;
+  while (true) {
+    for (let i = 0; i < BATCH; i++) {
+      const nonceStr = nonce.toString(16);
+      const input = new Uint8Array(challengeBytes.length + nonceStr.length);
+      input.set(challengeBytes);
+      input.set(encoder.encode(nonceStr), challengeBytes.length);
+      const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", input));
+
+      let valid = true;
+      for (let b = 0; b < fullBytes; b++) {
+        if (hash[b] !== 0) { valid = false; break; }
+      }
+      if (valid && remainBits > 0 && (hash[fullBytes] & mask) !== 0) valid = false;
+
+      if (valid) {
+        const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+        console.log(`[pow] Solved in ${elapsed}s (nonce=${nonceStr}, ${nonce} iterations)`);
+        return nonceStr;
+      }
+      nonce++;
+    }
+    // Yield to UI thread between batches
+    await new Promise(r => setTimeout(r, 0));
   }
-  return id;
 }
-const sessionId = getOrCreateSessionId();
+
+/**
+ * Obtain a session ID from the server via proof-of-work.
+ * Only needed when no session exists in localStorage.
+ */
+async function obtainSessionViaPow() {
+  console.log("[pow] Requesting challenge…");
+  const chResp = await fetch("/api/pow/challenge");
+  const chData = await chResp.json();
+  if (!chData.ok) throw new Error("Failed to get PoW challenge: " + (chData.error || "unknown"));
+
+  const nonce = await solvePoW(chData.challenge, chData.difficulty);
+
+  console.log("[pow] Submitting solution…");
+  const vResp = await fetch("/api/pow/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ challenge: chData.challenge, nonce }),
+  });
+  const vData = await vResp.json();
+  if (!vData.ok) throw new Error("PoW verification failed: " + (vData.error || "unknown"));
+
+  console.log("[pow] Session obtained: " + vData.session_id.slice(0, 8) + "…");
+  return vData.session_id;
+}
 
 // Some map IDs are absent in the extracted client dataset. Redirect these to
 // equivalent accessible maps to avoid hard 404 failures in browser play.
@@ -1515,6 +1575,14 @@ function connectWebSocket() {
       _duplicateLoginBlocked = true;
       if (_wsAuthResolve) { const r = _wsAuthResolve; _wsAuthResolve = null; r(false); }
       showDuplicateLoginOverlay();
+      return;
+    }
+
+    // Session expired/invalid — clear and reload to trigger new PoW
+    if (event.code === 4007) {
+      console.warn("[ws] Session expired — clearing and reloading");
+      localStorage.removeItem(SESSION_KEY);
+      window.location.reload();
       return;
     }
 
@@ -14483,6 +14551,17 @@ window.addEventListener("beforeunload", () => {
   console.log("[boot] Starting game init, online=" + !!window.__MAPLE_ONLINE__);
   console.log("[boot] Session ID: " + (sessionId ? sessionId.slice(0, 8) + "…" : "none"));
 
+  // ── Obtain a valid session via proof-of-work if needed (online only) ──
+  if (window.__MAPLE_ONLINE__ && !sessionId) {
+    console.log("[boot] No session — performing proof-of-work…");
+    try {
+      sessionId = await obtainSessionViaPow();
+      localStorage.setItem(SESSION_KEY, sessionId);
+    } catch (e) {
+      console.error("[boot] PoW failed:", e);
+    }
+  }
+
   let savedCharacter;
   try {
     savedCharacter = await loadCharacter();
@@ -14490,6 +14569,23 @@ window.addEventListener("beforeunload", () => {
   } catch (e) {
     console.error("[boot] loadCharacter threw:", e);
     savedCharacter = null;
+  }
+
+  // If the server rejected our session (expired/invalid), get a new one via PoW
+  if (window.__MAPLE_ONLINE__ && !savedCharacter && sessionId) {
+    try {
+      const checkResp = await fetch("/api/character/claimed", {
+        headers: { "Authorization": "Bearer " + sessionId },
+      });
+      if (checkResp.status === 401) {
+        console.log("[boot] Session rejected by server — performing proof-of-work…");
+        localStorage.removeItem(SESSION_KEY);
+        sessionId = await obtainSessionViaPow();
+        localStorage.setItem(SESSION_KEY, sessionId);
+      }
+    } catch (e) {
+      console.warn("[boot] Session check failed:", e);
+    }
   }
 
   let startMapId, startPortalName;

@@ -1,10 +1,42 @@
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
+import { createHash } from "node:crypto";
 import { createServer } from "./server.ts";
 import { InMemoryDataProvider } from "./data-provider.ts";
 import { createDefaultCharacter, initDatabase } from "./db.ts";
 import { setDebugMode } from "./ws.ts";
 import { loadDropPools } from "./reactor-system.ts";
 import * as path from "path";
+
+/** Solve a PoW challenge locally (for tests). */
+function solveChallenge(challenge: string, difficulty: number): string {
+  const fullBytes = Math.floor(difficulty / 8);
+  const remainBits = difficulty % 8;
+  const mask = remainBits > 0 ? (0xff << (8 - remainBits)) & 0xff : 0;
+  let nonce = 0;
+  while (true) {
+    const nonceStr = nonce.toString(16);
+    const hash = createHash("sha256").update(challenge + nonceStr).digest();
+    let valid = true;
+    for (let b = 0; b < fullBytes; b++) { if (hash[b] !== 0) { valid = false; break; } }
+    if (valid && remainBits > 0 && (hash[fullBytes] & mask) !== 0) valid = false;
+    if (valid) return nonceStr;
+    nonce++;
+  }
+}
+
+/** Obtain a valid session from the server via PoW. */
+async function getValidSession(baseUrl: string): Promise<string> {
+  const chResp = await fetch(`${baseUrl}/api/pow/challenge`);
+  const chData = await chResp.json() as { ok: boolean; challenge: string; difficulty: number };
+  const nonce = solveChallenge(chData.challenge, chData.difficulty);
+  const vResp = await fetch(`${baseUrl}/api/pow/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ challenge: chData.challenge, nonce }),
+  });
+  const vData = await vResp.json() as { ok: boolean; session_id: string };
+  return vData.session_id;
+}
 
 // Load drop pools from WZ data for tests
 loadDropPools(path.resolve(__dirname, "../../resourcesv2"));
@@ -87,47 +119,50 @@ describe("WebSocket server", () => {
   let server: ReturnType<typeof import("bun")["serve"]> & { roomManager?: unknown };
   let baseUrl: string;
   let wsUrl: string;
+  let sessionA: string;
+  let sessionB: string;
 
-  const sessionA = "ws-test-session-aaa";
-  const sessionB = "ws-test-session-bbb";
-
-  beforeAll(() => {
+  beforeAll(async () => {
+    process.env.POW_DIFFICULTY = "1"; // minimal difficulty for fast tests
     const provider = new InMemoryDataProvider();
-    const db = initDatabase(":memory:");
-
-    // Create test characters
-    createDefaultCharacter(db, sessionA, "Alice", false);
-    createDefaultCharacter(db, sessionB, "Bob", true);
 
     const { start } = createServer(provider, {
       port: 0,
       debug: false,
-      dbPath: ":memory:", // Note: server creates its own DB; we pre-seed below
+      dbPath: ":memory:",
     });
     server = start();
     baseUrl = `http://localhost:${server.port}`;
     wsUrl = `ws://localhost:${server.port}/ws`;
+
+    // Obtain valid sessions via PoW
+    sessionA = await getValidSession(baseUrl);
+    sessionB = await getValidSession(baseUrl);
   });
 
   afterAll(() => {
+    delete process.env.POW_DIFFICULTY;
     server?.stop();
   });
 
-  // Helper: create character via REST API so server DB has it
-  async function createCharacter(session: string, name: string) {
+  // Helper: create character via REST API with a PoW-issued session.
+  // Returns the valid session ID (ignores the `session` param — kept for call-site compat).
+  async function createCharacter(_session: string, name: string): Promise<string> {
+    const validSession = await getValidSession(baseUrl);
     const res = await fetch(`${baseUrl}/api/character/create`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session}` },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${validSession}` },
       body: JSON.stringify({ name, gender: false }),
     });
     if (!res.ok) {
       const body = await res.text();
       throw new Error(`createCharacter failed (${res.status}): ${body}`);
     }
+    return validSession;
   }
 
   test("rejects non-auth first message", async () => {
-    await createCharacter(sessionA, "Alice");
+    const _s1 = await createCharacter(sessionA, "Alice");
 
     const client = await openWS(wsUrl);
     client.send({ type: "move", x: 0, y: 0 });
@@ -141,23 +176,23 @@ describe("WebSocket server", () => {
     });
   });
 
-  test("rejects auth with unknown session", async () => {
+  test("rejects auth with invalid/non-PoW session", async () => {
     const client = await openWS(wsUrl);
     client.send({ type: "auth", session_id: "nonexistent-session-xyz" });
 
     await new Promise<void>((resolve) => {
       client.ws.onclose = (e: CloseEvent) => {
-        expect(e.code).toBe(4002);
+        expect(e.code).toBe(4007); // invalid/expired session
         resolve();
       };
     });
   });
 
   test("authenticates: receives change_map then map_state after map_loaded", async () => {
-    await createCharacter("auth-test-a", "Alice2");
+    const _s2 = await createCharacter("auth-test-a", "Alice2");
 
     const client = await openWS(wsUrl);
-    const { changeMap, mapState } = await authAndJoin(client, "auth-test-a");
+    const { changeMap, mapState } = await authAndJoin(client, _s2);
 
     expect(changeMap.map_id).toBe("100000001"); // default start map
     expect(Array.isArray(mapState.players)).toBe(true);
@@ -167,24 +202,24 @@ describe("WebSocket server", () => {
 
   test("two clients see each other", async () => {
     // Ensure characters exist with unique names
-    await createCharacter("multi-a", "MultiA");
-    await createCharacter("multi-b", "MultiB");
+    const _s3 = await createCharacter("multi-a", "MultiA");
+    const _s4 = await createCharacter("multi-b", "MultiB");
 
     // Connect client A
     const clientA = await openWS(wsUrl);
-    await authAndJoin(clientA, "multi-a");
+    await authAndJoin(clientA, _s3);
 
     // Connect client B (same default map)
     const clientB = await openWS(wsUrl);
-    const { mapState: bMapState } = await authAndJoin(clientB, "multi-b");
+    const { mapState: bMapState } = await authAndJoin(clientB, _s4);
 
     // Client B should get map_state with client A in it
     const players = bMapState.players as Array<{ id: string; name: string }>;
-    expect(players.some(p => p.id === "multi-a")).toBe(true);
+    expect(players.some(p => p.id === _s3)).toBe(true);
 
     // Client A should receive player_enter for client B
     const enterMsg = await clientA.waitForMessage("player_enter");
-    expect(enterMsg.id).toBe("multi-b");
+    expect(enterMsg.id).toBe(_s4);
     expect(enterMsg.name).toBe("MultiB");
 
     clientA.close();
@@ -192,14 +227,14 @@ describe("WebSocket server", () => {
   });
 
   test("move broadcasts to room", async () => {
-    await createCharacter("move-a", "MoverA");
-    await createCharacter("move-b", "MoverB");
+    const _s5 = await createCharacter("move-a", "MoverA");
+    const _s6 = await createCharacter("move-b", "MoverB");
 
     const clientA = await openWS(wsUrl);
-    await authAndJoin(clientA, "move-a");
+    await authAndJoin(clientA, _s5);
 
     const clientB = await openWS(wsUrl);
-    await authAndJoin(clientB, "move-b");
+    await authAndJoin(clientB, _s6);
 
     // Drain player_enter messages
     await clientA.waitForMessage("player_enter");
@@ -209,7 +244,7 @@ describe("WebSocket server", () => {
 
     // Client B should receive player_move
     const moveMsg = await clientB.waitForMessage("player_move");
-    expect(moveMsg.id).toBe("move-a");
+    expect(moveMsg.id).toBe(_s5);
     expect(moveMsg.x).toBe(100);
     expect(moveMsg.y).toBe(200);
     expect(moveMsg.action).toBe("walk1");
@@ -220,14 +255,14 @@ describe("WebSocket server", () => {
   });
 
   test("chat broadcasts to room", async () => {
-    await createCharacter("chat-a", "ChatterA");
-    await createCharacter("chat-b", "ChatterB");
+    const _s7 = await createCharacter("chat-a", "ChatterA");
+    const _s8 = await createCharacter("chat-b", "ChatterB");
 
     const clientA = await openWS(wsUrl);
-    await authAndJoin(clientA, "chat-a");
+    await authAndJoin(clientA, _s7);
 
     const clientB = await openWS(wsUrl);
-    await authAndJoin(clientB, "chat-b");
+    await authAndJoin(clientB, _s8);
 
     // Drain player_enter
     await clientA.waitForMessage("player_enter");
@@ -248,14 +283,14 @@ describe("WebSocket server", () => {
   });
 
   test("disconnect broadcasts player_leave", async () => {
-    await createCharacter("leave-a", "LeaverA");
-    await createCharacter("leave-b", "LeaverB");
+    const _s9 = await createCharacter("leave-a", "LeaverA");
+    const _s10 = await createCharacter("leave-b", "LeaverB");
 
     const clientA = await openWS(wsUrl);
-    await authAndJoin(clientA, "leave-a");
+    await authAndJoin(clientA, _s9);
 
     const clientB = await openWS(wsUrl);
-    await authAndJoin(clientB, "leave-b");
+    await authAndJoin(clientB, _s10);
     await clientA.waitForMessage("player_enter");
 
     // Client A disconnects
@@ -263,16 +298,16 @@ describe("WebSocket server", () => {
 
     // Client B should receive player_leave
     const leaveMsg = await clientB.waitForMessage("player_leave");
-    expect(leaveMsg.id).toBe("leave-a");
+    expect(leaveMsg.id).toBe(_s9);
 
     clientB.close();
   });
 
   test("ping responds with pong", async () => {
-    await createCharacter("ping-a", "PingerA");
+    const _s11 = await createCharacter("ping-a", "PingerA");
 
     const client = await openWS(wsUrl);
-    await authAndJoin(client, "ping-a");
+    await authAndJoin(client, _s11);
 
     client.send({ type: "ping" });
     const pong = await client.waitForMessage("pong");
@@ -282,17 +317,17 @@ describe("WebSocket server", () => {
   });
 
   test("admin_warp works when debug mode is enabled", async () => {
-    await createCharacter("room-a", "RoomA");
-    await createCharacter("room-b", "RoomB");
+    const _s12 = await createCharacter("room-a", "RoomA");
+    const _s13 = await createCharacter("room-b", "RoomB");
 
     // Enable debug mode for this test
     setDebugMode(true);
 
     const clientA = await openWS(wsUrl);
-    await authAndJoin(clientA, "room-a");
+    await authAndJoin(clientA, _s12);
 
     const clientB = await openWS(wsUrl);
-    await authAndJoin(clientB, "room-b");
+    await authAndJoin(clientB, _s13);
     await clientA.waitForMessage("player_enter");
 
     // Client A warps to a different map via admin_warp
@@ -311,7 +346,7 @@ describe("WebSocket server", () => {
 
     // Client B should get player_leave
     const leaveMsg = await clientB.waitForMessage("player_leave");
-    expect(leaveMsg.id).toBe("room-a");
+    expect(leaveMsg.id).toBe(_s12);
 
     clientA.close();
     clientB.close();
@@ -319,11 +354,11 @@ describe("WebSocket server", () => {
   });
 
   test("admin_warp is denied when debug mode is off", async () => {
-    await createCharacter("nodebug-a", "NoDebugA");
+    const _s14 = await createCharacter("nodebug-a", "NoDebugA");
 
     setDebugMode(false);
     const client = await openWS(wsUrl);
-    await authAndJoin(client, "nodebug-a");
+    await authAndJoin(client, _s14);
 
     client.send({ type: "admin_warp", map_id: "100000000" });
     const denied = await client.waitForMessage("portal_denied");
@@ -333,10 +368,10 @@ describe("WebSocket server", () => {
   });
 
   test("enter_map and leave_map are silently ignored", async () => {
-    await createCharacter("compat-a", "CompatA");
+    const _s15 = await createCharacter("compat-a", "CompatA");
 
     const clientA = await openWS(wsUrl);
-    await authAndJoin(clientA, "compat-a");
+    await authAndJoin(clientA, _s15);
 
     // Send deprecated messages — should be silently ignored, no crash
     clientA.send({ type: "enter_map", map_id: "100000000" });
@@ -351,15 +386,15 @@ describe("WebSocket server", () => {
   });
 
   test("rejects duplicate session (already logged in)", async () => {
-    await createCharacter("dup-a", "DupA");
+    const _s16 = await createCharacter("dup-a", "DupA");
 
     // First connection succeeds
     const client1 = await openWS(wsUrl);
-    await authAndJoin(client1, "dup-a");
+    await authAndJoin(client1, _s16);
 
     // Second connection with same session should be rejected
     const client2 = await openWS(wsUrl);
-    client2.send({ type: "auth", session_id: "dup-a" });
+    client2.send({ type: "auth", session_id: _s16 });
 
     await new Promise<void>((resolve) => {
       client2.ws.onclose = (e: CloseEvent) => {
@@ -378,16 +413,16 @@ describe("WebSocket server", () => {
 
   test("cannot steal unclaimed name from online player", async () => {
     const onlineSession = "online-holder-session";
-    const thiefSession = "thief-session";
 
     // Create a character with an unclaimed name
-    await createCharacter(onlineSession, "OnlineHero");
+    const _s17 = await createCharacter(onlineSession, "OnlineHero");
 
     // Connect via WebSocket (player is now online)
     const client = await openWS(wsUrl);
-    await authAndJoin(client, onlineSession);
+    await authAndJoin(client, _s17);
 
     // Another session tries to create a character with the same name
+    const thiefSession = await getValidSession(baseUrl);
     const res = await fetch(`${baseUrl}/api/character/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${thiefSession}` },
@@ -402,12 +437,12 @@ describe("WebSocket server", () => {
 
   test("can take unclaimed name from offline player", async () => {
     const offlineSession = "offline-holder-session";
-    const takerSession = "taker-session";
 
     // Create a character with an unclaimed name (no WS connection = offline)
-    await createCharacter(offlineSession, "OfflineHero");
+    const _s18 = await createCharacter(offlineSession, "OfflineHero");
 
     // Another session takes the name — should succeed (unclaimed + offline)
+    const takerSession = await getValidSession(baseUrl);
     const res = await fetch(`${baseUrl}/api/character/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${takerSession}` },
@@ -420,10 +455,10 @@ describe("WebSocket server", () => {
   });
 
   test("use_portal validates portal proximity", async () => {
-    await createCharacter("portal-a", "PortalA");
+    const _s19 = await createCharacter("portal-a", "PortalA");
 
     const client = await openWS(wsUrl);
-    await authAndJoin(client, "portal-a");
+    await authAndJoin(client, _s19);
 
     // Move client to a known position far from any portal (confirms position)
     client.send({ type: "move", x: 9999, y: 9999, action: "stand1", facing: 1 });
@@ -439,10 +474,10 @@ describe("WebSocket server", () => {
   });
 
   test("use_portal requires position confirmation", async () => {
-    await createCharacter("portal-nopos", "PortalNoPos");
+    const _s20 = await createCharacter("portal-nopos", "PortalNoPos");
 
     const client = await openWS(wsUrl);
-    await authAndJoin(client, "portal-nopos");
+    await authAndJoin(client, _s20);
 
     // Try to use portal WITHOUT sending any move first
     client.send({ type: "use_portal", portal_name: "out02" });
@@ -454,10 +489,10 @@ describe("WebSocket server", () => {
   });
 
   test("use_portal with nonexistent portal is denied", async () => {
-    await createCharacter("portal-b", "PortalB");
+    const _s21 = await createCharacter("portal-b", "PortalB");
 
     const client = await openWS(wsUrl);
-    await authAndJoin(client, "portal-b");
+    await authAndJoin(client, _s21);
 
     // Must confirm position first
     client.send({ type: "move", x: 100, y: 200, action: "stand1", facing: 1 });
@@ -472,10 +507,10 @@ describe("WebSocket server", () => {
   });
 
   test("npc_warp validates NPC is on current map", async () => {
-    await createCharacter("npc-a", "NpcA");
+    const _s22 = await createCharacter("npc-a", "NpcA");
 
     const client = await openWS(wsUrl);
-    await authAndJoin(client, "npc-a");
+    await authAndJoin(client, _s22);
 
     // Try NPC warp with an NPC that doesn't exist on the default map
     client.send({ type: "npc_warp", npc_id: "9999999", map_id: 100000000 });
@@ -488,10 +523,10 @@ describe("WebSocket server", () => {
   test("npc_warp validates destination is allowed for NPC", async () => {
     // This test needs an NPC that IS on map 100000001
     // Let's check if there are NPCs on the default start map
-    await createCharacter("npc-b", "NpcB");
+    const _s23 = await createCharacter("npc-b", "NpcB");
 
     const client = await openWS(wsUrl);
-    await authAndJoin(client, "npc-b");
+    await authAndJoin(client, _s23);
 
     // Try warp with a valid NPC but invalid destination
     // Map 100000001 should have some NPCs - send npc_warp with one + bogus destination
@@ -505,10 +540,10 @@ describe("WebSocket server", () => {
   });
 
   test("save_state persists inventory and equipment to DB", async () => {
-    await createCharacter("save-test", "SaveTester");
+    const _s24 = await createCharacter("save-test", "SaveTester");
 
     const client = await openWS(wsUrl);
-    await authAndJoin(client, "save-test");
+    await authAndJoin(client, _s24);
 
     // Send save_state with custom inventory and equipment
     client.send({
@@ -533,7 +568,7 @@ describe("WebSocket server", () => {
 
     // Load character from REST API and verify the saved state
     const loadRes = await fetch(`${baseUrl}/api/character/load`, {
-      headers: { Authorization: "Bearer save-test" },
+      headers: { Authorization: `Bearer ${_s24}` },
     });
     const body = await loadRes.json();
     const data = body.data ?? body;
@@ -558,10 +593,10 @@ describe("WebSocket server", () => {
   });
 
   test("disconnect persists last-known state to DB", async () => {
-    await createCharacter("dc-test", "DcTester");
+    const _s25 = await createCharacter("dc-test", "DcTester");
 
     const client = await openWS(wsUrl);
-    await authAndJoin(client, "dc-test");
+    await authAndJoin(client, _s25);
 
     // Move to update position
     client.send({ type: "move", x: 300, y: 200, action: "walk1", facing: 1 });
@@ -583,7 +618,7 @@ describe("WebSocket server", () => {
 
     // Load and verify disconnect save captured the state
     const loadRes = await fetch(`${baseUrl}/api/character/load`, {
-      headers: { Authorization: "Bearer dc-test" },
+      headers: { Authorization: `Bearer ${_s25}` },
     });
     const body = await loadRes.json();
     const data = body.data ?? body;
@@ -598,10 +633,10 @@ describe("WebSocket server", () => {
   });
 
   test("hit_reactor: server validates and advances state", async () => {
-    await createCharacter("reactor-hitter", "Hitter");
+    const _s26 = await createCharacter("reactor-hitter", "Hitter");
 
     const client = await openWS(wsUrl);
-    await authAndJoin(client, "reactor-hitter");
+    await authAndJoin(client, _s26);
 
     // map_state should include reactors for map 100000001
     // (already consumed by authAndJoin, but let's verify structure by checking a fresh join)
@@ -615,16 +650,16 @@ describe("WebSocket server", () => {
     expect(hitMsg.reactor_idx).toBe(0);
     expect(hitMsg.new_state).toBe(1);
     expect(hitMsg.new_hp).toBe(3);
-    expect(hitMsg.hitter_id).toBe("reactor-hitter");
+    expect(hitMsg.hitter_id).toBe(_s26);
 
     client.close();
   });
 
   test("hit_reactor: destroy after 4 hits spawns loot drop", async () => {
-    await createCharacter("reactor-destroy", "Destroyer");
+    const _s27 = await createCharacter("reactor-destroy", "Destroyer");
 
     const client = await openWS(wsUrl);
-    const { mapState } = await authAndJoin(client, "reactor-destroy");
+    const { mapState } = await authAndJoin(client, _s27);
 
     // Verify reactors in map_state
     expect(Array.isArray(mapState.reactors)).toBe(true);
@@ -657,10 +692,10 @@ describe("WebSocket server", () => {
   });
 
   test("hit_reactor: cooldown rejects rapid hits", async () => {
-    await createCharacter("reactor-cd", "CooldownGuy");
+    const _s28 = await createCharacter("reactor-cd", "CooldownGuy");
 
     const client = await openWS(wsUrl);
-    await authAndJoin(client, "reactor-cd");
+    await authAndJoin(client, _s28);
 
     // Move near reactor 2 (x=600, y=274)
     client.send({ type: "move", x: 600, y: 274, action: "stand1", facing: 1 });
@@ -685,10 +720,10 @@ describe("WebSocket server", () => {
   });
 
   test("hit_reactor: out of range rejected", async () => {
-    await createCharacter("reactor-range", "RangeGuy");
+    const _s29 = await createCharacter("reactor-range", "RangeGuy");
 
     const client = await openWS(wsUrl);
-    await authAndJoin(client, "reactor-range");
+    await authAndJoin(client, _s29);
 
     // Move far from reactor 3 (x=1000, y=274) — stand at x=0
     client.send({ type: "move", x: 0, y: 274, action: "stand1", facing: 1 });
@@ -708,13 +743,13 @@ describe("WebSocket server", () => {
 
   test("loot_item: non-owner cannot loot within 5s", async () => {
     // Player A destroys a reactor, getting owner rights on the drop
-    await createCharacter("loot-owner", "LootOwner");
-    await createCharacter("loot-thief", "LootThief");
+    const _s30 = await createCharacter("loot-owner", "LootOwner");
+    const _s31 = await createCharacter("loot-thief", "LootThief");
 
     const clientA = await openWS(wsUrl);
     const clientB = await openWS(wsUrl);
-    await authAndJoin(clientA, "loot-owner");
-    await authAndJoin(clientB, "loot-thief");
+    await authAndJoin(clientA, _s30);
+    await authAndJoin(clientB, _s31);
 
     // A moves to reactor 4 (x=1000, y=274) and destroys it
     clientA.send({ type: "move", x: 1000, y: 274, action: "stand1", facing: 1 });
@@ -731,7 +766,7 @@ describe("WebSocket server", () => {
     // Get the drop_spawn
     const dropMsg = await clientA.waitForMessage("drop_spawn");
     const dropId = dropMsg.drop.drop_id;
-    expect(dropMsg.drop.owner_id).toBe("loot-owner");
+    expect(dropMsg.drop.owner_id).toBe(_s30);
 
     // B tries to loot immediately — should be rejected (not owner, < 5s)
     clientB.send({ type: "move", x: 1000, y: 274, action: "stand1", facing: 1 });
@@ -747,7 +782,7 @@ describe("WebSocket server", () => {
     // A can loot immediately
     clientA.send({ type: "loot_item", drop_id: dropId });
     const lootMsg = await clientA.waitForMessage("drop_loot");
-    expect(lootMsg.looter_id).toBe("loot-owner");
+    expect(lootMsg.looter_id).toBe(_s30);
 
     clientA.close();
     clientB.close();

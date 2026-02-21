@@ -1,12 +1,47 @@
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
+import { createHash } from "node:crypto";
 import { createServer } from "./server.ts";
 import { InMemoryDataProvider } from "./data-provider.ts";
+
+/** Solve a PoW challenge locally (for tests). */
+function solveChallenge(challenge: string, difficulty: number): string {
+  const fullBytes = Math.floor(difficulty / 8);
+  const remainBits = difficulty % 8;
+  const mask = remainBits > 0 ? (0xff << (8 - remainBits)) & 0xff : 0;
+  let nonce = 0;
+  while (true) {
+    const nonceStr = nonce.toString(16);
+    const hash = createHash("sha256").update(challenge + nonceStr).digest();
+    let valid = true;
+    for (let b = 0; b < fullBytes; b++) { if (hash[b] !== 0) { valid = false; break; } }
+    if (valid && remainBits > 0 && (hash[fullBytes] & mask) !== 0) valid = false;
+    if (valid) return nonceStr;
+    nonce++;
+  }
+}
+
+/** Obtain a valid session from the server via PoW. */
+async function getValidSession(baseUrl: string): Promise<string> {
+  const chResp = await fetch(`${baseUrl}/api/pow/challenge`);
+  const chData = await chResp.json() as { ok: boolean; challenge: string; difficulty: number };
+  const nonce = solveChallenge(chData.challenge, chData.difficulty);
+  const vResp = await fetch(`${baseUrl}/api/pow/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ challenge: chData.challenge, nonce }),
+  });
+  const vData = await vResp.json() as { ok: boolean; session_id: string };
+  return vData.session_id;
+}
 
 describe("character API", () => {
   let server: ReturnType<typeof import("bun")["serve"]>;
   let baseUrl: string;
+  let session1: string;
+  let session2: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
+    process.env.POW_DIFFICULTY = "1"; // minimal difficulty for fast tests
     const provider = new InMemoryDataProvider();
     const { start } = createServer(provider, {
       port: 0,
@@ -15,14 +50,14 @@ describe("character API", () => {
     });
     server = start();
     baseUrl = `http://localhost:${server.port}`;
+    session1 = await getValidSession(baseUrl);
+    session2 = await getValidSession(baseUrl);
   });
 
   afterAll(() => {
+    delete process.env.POW_DIFFICULTY;
     server?.stop();
   });
-
-  const session1 = "test-session-aaa-111";
-  const session2 = "test-session-bbb-222";
 
   function authHeaders(session: string) {
     return { Authorization: `Bearer ${session}`, "Content-Type": "application/json" };
@@ -92,9 +127,10 @@ describe("character API", () => {
   });
 
   test("POST /api/character/create rejects invalid name", async () => {
+    const freshSession = await getValidSession(baseUrl);
     const res = await fetch(`${baseUrl}/api/character/create`, {
       method: "POST",
-      headers: authHeaders("fresh-invalid-name-test"),
+      headers: authHeaders(freshSession),
       body: JSON.stringify({ name: "A", gender: false }),
     });
     expect(res.status).toBe(400);
@@ -124,7 +160,7 @@ describe("character API", () => {
 
   test("POST /api/character/create rejects case-insensitive duplicate name", async () => {
     // session2 owns "TestPlayer" (claimed) — "testplayer" should also be rejected
-    const session3 = "test-session-3";
+    const session3 = await getValidSession(baseUrl);
     const res = await fetch(`${baseUrl}/api/character/create`, {
       method: "POST",
       headers: authHeaders(session3),
@@ -148,9 +184,20 @@ describe("character API", () => {
     expect(body.name).toBe("TestPlayer2");
   });
 
-  test("GET /api/character/load returns 404 for unknown session", async () => {
+  test("GET /api/character/load returns 401 for unregistered session", async () => {
     const res = await fetch(`${baseUrl}/api/character/load`, {
-      headers: authHeaders("unknown-session"),
+      headers: authHeaders("unknown-session-not-from-pow"),
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.error.code).toBe("SESSION_EXPIRED");
+  });
+
+  test("GET /api/character/load returns 404 for valid session with no character", async () => {
+    const freshSession = await getValidSession(baseUrl);
+    const res = await fetch(`${baseUrl}/api/character/load`, {
+      headers: authHeaders(freshSession),
     });
     expect(res.status).toBe(404);
     const body = await res.json();
