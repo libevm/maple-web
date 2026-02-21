@@ -885,6 +885,24 @@ export function handleClientMessage(
       const jqQuests = client.achievements.jq_quests as Record<string, number>;
       jqQuests[achKey] = (jqQuests[achKey] || 0) + 1;
 
+      // Bonus drop: Zakum Helmet (25% chance on Breath of Lava completion)
+      let bonusItemId = 0;
+      let bonusItemName = "";
+      if (client.mapId === "280020001" && Math.random() < 0.25) {
+        bonusItemId = 1002357; // Zakum Helmet
+        bonusItemName = getItemName(bonusItemId) || "Zakum Helmet";
+        const equipMaxSlot = client.inventory
+          .filter(it => it.inv_type === "EQUIP")
+          .reduce((max, it) => Math.max(max, it.slot), -1);
+        client.inventory.push({
+          item_id: bonusItemId,
+          qty: 1,
+          inv_type: "EQUIP",
+          slot: equipMaxSlot + 1,
+          category: "Cap",
+        });
+      }
+
       // Persist immediately
       persistClientState(client, _moduleDb);
 
@@ -897,6 +915,8 @@ export function handleClientMessage(
         item_qty: reward.qty,
         item_category: reward.category,
         completions: jqQuests[achKey],
+        bonus_item_id: bonusItemId || undefined,
+        bonus_item_name: bonusItemName || undefined,
       });
 
       // Warp player back to Mushroom Park

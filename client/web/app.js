@@ -1973,17 +1973,39 @@ function handleServerMessage(msg) {
       if (!runtime.player.achievements.jq_quests) runtime.player.achievements.jq_quests = {};
       runtime.player.achievements.jq_quests[questName] = completions;
 
+      // Handle bonus item (e.g. Zakum Helmet)
+      const bonusItemId = Number(msg.bonus_item_id) || 0;
+      const bonusItemName = msg.bonus_item_name || "";
+      if (bonusItemId) {
+        const bonusMaxSlot = playerInventory
+          .filter(it => it.invType === "EQUIP")
+          .reduce((max, it) => Math.max(max, it.slot), -1);
+        playerInventory.push({
+          id: bonusItemId,
+          name: bonusItemName,
+          qty: 1,
+          invType: "EQUIP",
+          slot: bonusMaxSlot + 1,
+          category: "Cap",
+        });
+      }
+
       // Grey system message in chat
+      let rewardText = `You've completed ${questName} and have received ${itemName}!`;
+      if (bonusItemName) {
+        rewardText += ` You also received a ${bonusItemName}!`;
+      }
+      rewardText += ` Refresh the page if it doesn't appear in your inventory.`;
       const sysMsg = {
         name: "",
-        text: `You've completed ${questName} and have received ${itemName}! Refresh the page if it doesn't appear in your inventory.`,
+        text: rewardText,
         timestamp: Date.now(),
         type: "system",
       };
       runtime.chat.history.push(sysMsg);
       if (runtime.chat.history.length > runtime.chat.maxHistory) runtime.chat.history.shift();
       appendChatLogMessage(sysMsg);
-      rlog(`[JQ] Reward: ${itemName} (${itemId}) for ${questName}, completions=${completions}`);
+      rlog(`[JQ] Reward: ${itemName} (${itemId}) for ${questName}, completions=${completions}${bonusItemName ? `, bonus: ${bonusItemName}` : ""}`);
       break;
     }
 
