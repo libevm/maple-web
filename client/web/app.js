@@ -13853,6 +13853,175 @@ async function loadMap(mapId, spawnPortalName = null, spawnFromPortalTransfer = 
   }
 }
 
+function isMobileClient() {
+  if (typeof window === "undefined") return false;
+  const coarsePointer = window.matchMedia?.("(pointer: coarse)")?.matches === true;
+  const ua = navigator.userAgent || "";
+  const mobileUa = /Android|iPhone|iPad|iPod|Mobile|IEMobile|Opera Mini/i.test(ua);
+  return coarsePointer || mobileUa;
+}
+
+function setupMobileTouchControls() {
+  if (!window.__MAPLE_ONLINE__) return;
+  if (!isMobileClient()) return;
+
+  const wrapper = canvasEl.parentElement;
+  if (!wrapper) return;
+
+  const overlay = document.createElement("div");
+  overlay.id = "mobile-touch-controls";
+  overlay.style.cssText = [
+    "position:absolute",
+    "left:0",
+    "right:0",
+    "bottom:calc(env(safe-area-inset-bottom, 0px) + 14px)",
+    "z-index:120000",
+    "display:flex",
+    "justify-content:space-between",
+    "align-items:flex-end",
+    "padding:0 12px",
+    "pointer-events:none",
+    "user-select:none",
+  ].join(";");
+
+  const dpad = document.createElement("div");
+  dpad.style.cssText = "display:grid;grid-template-columns:64px 64px 64px;grid-template-rows:64px 64px 64px;gap:8px;pointer-events:auto;touch-action:none;";
+
+  const actions = document.createElement("div");
+  actions.style.cssText = "display:flex;flex-direction:column;align-items:flex-end;gap:10px;pointer-events:auto;touch-action:none;margin-right:2px;";
+
+  function mkBtn(label, gridPos = "") {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    b.style.cssText = [
+      "width:64px",
+      "height:64px",
+      "border-radius:16px",
+      "border:1px solid rgba(255,255,255,0.28)",
+      "background:rgba(15,23,42,0.46)",
+      "color:rgba(226,232,240,0.96)",
+      "font-weight:700",
+      "font-size:22px",
+      "backdrop-filter:blur(6px)",
+      "box-shadow:0 6px 18px rgba(0,0,0,0.28)",
+      "touch-action:none",
+    ].join(";");
+    if (gridPos) b.style.gridArea = gridPos;
+    return b;
+  }
+
+  const upBtn = mkBtn("↑", "1 / 2");
+  const leftBtn = mkBtn("←", "2 / 1");
+  const downBtn = mkBtn("↓", "2 / 2");
+  const rightBtn = mkBtn("→", "2 / 3");
+
+  const jumpBtn = mkBtn("J");
+  jumpBtn.style.width = "76px";
+  jumpBtn.style.height = "76px";
+  jumpBtn.style.borderRadius = "999px";
+  const attackBtn = mkBtn("A");
+  attackBtn.style.width = "72px";
+  attackBtn.style.height = "72px";
+  attackBtn.style.borderRadius = "999px";
+
+  dpad.append(upBtn, leftBtn, downBtn, rightBtn);
+  // Attack above, jump below (primary thumb button)
+  actions.append(attackBtn, jumpBtn);
+  overlay.append(dpad, actions);
+  wrapper.appendChild(overlay);
+
+  const activePointers = {
+    left: new Set(),
+    right: new Set(),
+    up: new Set(),
+    down: new Set(),
+    jump: new Set(),
+  };
+
+  function press(action, event) {
+    event.preventDefault();
+    event.stopPropagation();
+    canvasEl.focus();
+    runtime.input.enabled = true;
+
+    if (action === "attack") {
+      performAttack();
+      return;
+    }
+
+    const id = event.pointerId ?? "mouse";
+    activePointers[action]?.add(id);
+
+    if (action === "left") runtime.input.left = true;
+    if (action === "right") runtime.input.right = true;
+    if (action === "down") runtime.input.down = true;
+    if (action === "up") {
+      const wasUp = runtime.input.up;
+      runtime.input.up = true;
+      if (!wasUp) void tryUsePortal(true);
+    }
+    if (action === "jump") {
+      if (!runtime.input.jumpHeld) runtime.input.jumpQueued = true;
+      runtime.input.jumpHeld = true;
+    }
+  }
+
+  function release(action, event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const id = event.pointerId ?? "mouse";
+    activePointers[action]?.delete(id);
+
+    if (action === "left" && activePointers.left.size === 0) runtime.input.left = false;
+    if (action === "right" && activePointers.right.size === 0) runtime.input.right = false;
+    if (action === "up" && activePointers.up.size === 0) runtime.input.up = false;
+    if (action === "down" && activePointers.down.size === 0) runtime.input.down = false;
+    if (action === "jump" && activePointers.jump.size === 0) runtime.input.jumpHeld = false;
+  }
+
+  function setPressedVisual(button, pressed) {
+    button.style.background = pressed
+      ? "rgba(59,130,246,0.42)"
+      : "rgba(15,23,42,0.46)";
+    button.style.transform = pressed ? "scale(0.96)" : "scale(1)";
+  }
+
+  function wireHold(button, action) {
+    button.addEventListener("pointerdown", (e) => {
+      setPressedVisual(button, true);
+      press(action, e);
+    });
+    button.addEventListener("pointerup", (e) => {
+      setPressedVisual(button, false);
+      release(action, e);
+    });
+    button.addEventListener("pointercancel", (e) => {
+      setPressedVisual(button, false);
+      release(action, e);
+    });
+    button.addEventListener("pointerleave", (e) => {
+      setPressedVisual(button, false);
+      release(action, e);
+    });
+  }
+
+  wireHold(leftBtn, "left");
+  wireHold(rightBtn, "right");
+  wireHold(upBtn, "up");
+  wireHold(downBtn, "down");
+  wireHold(jumpBtn, "jump");
+  attackBtn.addEventListener("pointerdown", (e) => {
+    setPressedVisual(attackBtn, true);
+    press("attack", e);
+  });
+  attackBtn.addEventListener("pointerup", () => setPressedVisual(attackBtn, false));
+  attackBtn.addEventListener("pointercancel", () => setPressedVisual(attackBtn, false));
+  attackBtn.addEventListener("pointerleave", () => setPressedVisual(attackBtn, false));
+
+  rlog("Mobile touch controls enabled (online mode).");
+}
+
 function bindInput() {
   // Build gameplay keys dynamically from current keybinds
   function getGameplayKeys() {
@@ -14539,6 +14708,7 @@ syncKeybindButtons();
 }
 
 bindInput();
+setupMobileTouchControls();
 requestAnimationFrame(tick);
 
 // Start loading screen asset preload in background (non-blocking)

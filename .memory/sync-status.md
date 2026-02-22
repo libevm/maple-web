@@ -1,10 +1,32 @@
 # .memory Sync Status
 
-Last synced: 2026-02-22T12:24:00+11:00
+Last synced: 2026-02-22T12:41:00+11:00
 Status: ✅ Synced
 
+## 2026-02-22 update (mobile touch overlay UX pass)
+- Optimized `client:online` mobile touch controls for thumb reach in `client/web/app.js`:
+  - moved overlay lower with safe-area-aware bottom offset,
+  - increased D-pad and action button sizes,
+  - stacked action cluster on right (`A` above, larger `J` below),
+  - added pressed-state visual feedback (scale + tint).
+- Updated control visuals to be more semi-transparent:
+  - translucent navy background,
+  - subtle border + shadow,
+  - backdrop blur.
+- Updated `.memory/client-server.md` to reflect refined mobile input UX.
+
+## 2026-02-22 update (mobile online touch controls)
+- Added automatic mobile touch controls for `client:online` in `client/web/app.js`.
+- Detection: online flag (`window.__MAPLE_ONLINE__`) + mobile/coarse-pointer check.
+- New on-screen overlay controls:
+  - D-pad arrows for movement (`left/right/up/down`),
+  - `J` jump button,
+  - `A` attack button.
+- `up` touch press triggers portal attempt (`tryUsePortal(true)`) like keyboard up.
+- Updated `README.md` controls section and `.memory/client-server.md` movement input notes.
+
 ## 2026-02-22 update (`create-gm` CLI script)
-- Added new root command: `bun run create-gm <username> <password> --db <db-path>`.
+- Added new root command: `bun run create-gm <username> <password> --db <db-path>.
 - New script file: `server/src/create-gm.ts`.
   - Creates default character if missing,
   - Upserts bcrypt password in `credentials`,

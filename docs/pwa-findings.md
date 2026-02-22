@@ -28,6 +28,37 @@ The docs UI includes sidebar navigation for markdown files under `docs/`.
 
 ---
 
+## 2026-02-22 12:41 (GMT+11) — Mobile touch overlay UX tuning (thumb reach + semi-transparent look)
+
+### Summary
+Refined the online mobile controls overlay for better ergonomics and visibility.
+
+### What changed
+- `client/web/app.js`
+  - moved control overlay lower with safe-area-aware bottom offset
+  - increased button sizes for easier thumb taps
+  - arranged action buttons with `A` above and larger `J` below on right side
+  - added pressed-state feedback (tint + slight scale)
+  - updated button visuals to semi-transparent style (translucent background + blur + subtle shadow)
+
+## 2026-02-22 12:33 (GMT+11) — Mobile touch controls for `client:online`
+
+### Summary
+Added automatic on-screen touch controls for online mobile clients.
+
+### What changed
+- `client/web/app.js`
+  - added mobile/coarse-pointer detection helper
+  - added `setupMobileTouchControls()`
+  - renders a touch overlay with:
+    - D-pad arrows (`← ↑ ↓ →`)
+    - `J` jump button
+    - `A` attack button
+  - wired controls to existing input/attack flow (`runtime.input.*`, `performAttack`, `tryUsePortal`)
+
+### Notes
+- Touch controls are only enabled in online mode (`window.__MAPLE_ONLINE__`).
+
 ## 2026-02-22 12:24 (GMT+11) — Added `create-gm` CLI command
 
 ### Summary

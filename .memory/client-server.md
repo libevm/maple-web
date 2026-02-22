@@ -547,6 +547,12 @@ allClients: Map<sessionId, WSClient>
 - WASD removed — only configurable movement keys in `runtime.keybinds`
 - `moveLeft`, `moveRight`, `moveUp`, `moveDown` (default: arrow keys)
 - `getGameplayKeys()` builds key set dynamically from current keybinds
+- Online mobile clients (`window.__MAPLE_ONLINE__` + mobile/coarse-pointer detect) spawn an on-screen touch overlay optimized for thumb reach:
+  - larger semi-transparent controls with blur/backdrop,
+  - bottom-safe-area positioning,
+  - D-pad arrows map to `runtime.input.left/right/up/down`,
+  - `J` (larger lower-right) maps to jump hold/queue,
+  - `A` (upper-right) triggers `performAttack()`.
 
 ---
 
