@@ -143,6 +143,24 @@ export function initDatabase(dbPath: string = "./data/maple.db"): Database {
     ON logs (timestamp DESC)
   `);
 
+  // ── Admin sessions: bearer token hashes for /api/admin/* ──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS admin_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL COLLATE NOCASE,
+      token_hash TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL,
+      ip TEXT NOT NULL DEFAULT '',
+      user_agent TEXT NOT NULL DEFAULT ''
+    )
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_admin_sessions_expires
+    ON admin_sessions (expires_at)
+  `);
+
   // ── Migration: old session_id-keyed schema → name-keyed schema ──
   migrateToNameKeyed(db);
 
@@ -386,6 +404,55 @@ export function appendLog(db: Database, username: string, action: string, ip: st
     // Never let logging failures crash the server
     console.error(`[logs] Failed to append log for ${username}: ${e}`);
   }
+}
+
+// ─── Admin session helpers ───────────────────────────────────────────
+
+export type AdminSession = {
+  username: string;
+  expires_at: string;
+};
+
+export function createAdminSession(
+  db: Database,
+  username: string,
+  tokenHash: string,
+  expiresAt: string,
+  ip: string,
+  userAgent: string,
+): void {
+  db.prepare(
+    `INSERT INTO admin_sessions (username, token_hash, expires_at, ip, user_agent)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(username, tokenHash, expiresAt, ip, userAgent);
+}
+
+export function getAdminSession(db: Database, tokenHash: string): AdminSession | null {
+  const row = db.prepare(
+    `SELECT username, expires_at
+       FROM admin_sessions
+      WHERE token_hash = ?
+        AND expires_at > datetime('now')`
+  ).get(tokenHash) as AdminSession | null;
+  return row;
+}
+
+export function touchAdminSession(db: Database, tokenHash: string, expiresAt: string): void {
+  db.prepare(
+    `UPDATE admin_sessions
+        SET expires_at = ?
+      WHERE token_hash = ?`
+  ).run(expiresAt, tokenHash);
+}
+
+export function revokeAdminSession(db: Database, tokenHash: string): void {
+  db.prepare("DELETE FROM admin_sessions WHERE token_hash = ?").run(tokenHash);
+}
+
+export function purgeExpiredAdminSessions(db: Database): number {
+  db.prepare("DELETE FROM admin_sessions WHERE expires_at <= datetime('now')").run();
+  const changed = db.query("SELECT changes() AS n").get() as { n: number } | null;
+  return changed?.n ?? 0;
 }
 
 // ─── Account claim / login ──────────────────────────────────────────

@@ -87,6 +87,7 @@ bun run docs:test
 bun run client:web
 bun run client:offline
 bun run client:online
+bun run client:admin-ui
 ```
 
 ### What they do
@@ -98,6 +99,7 @@ bun run client:online
 - `docs:test` runs docs renderer/discovery unit tests.
 - `client:offline` starts the standalone browser client (no server dependency, all state local).
 - `client:online` starts the browser client with API proxy to the game server.
+- `client:admin-ui` starts a GM-only database admin dashboard UI (default `http://127.0.0.1:5174`) and proxies `/api/admin/*` to the same game server.
 - `client:web` legacy alias for `client:offline`.
 - `extract:v2` extracts V2 map dependencies from `resources/` → `resourcesv2/` (90 files: maps, mobs, NPCs, tiles, objects, backgrounds, BGM, character base, UI, strings).
   Run this before using V2 mode (`?v2=1` or online mode).
@@ -184,6 +186,24 @@ Open:
 - default: `http://127.0.0.1:5173/?mapId=104040000`
 - if 5173 is busy, use the URL printed in terminal.
 - online mode env: `GAME_SERVER_URL=http://host:port` (default `http://127.0.0.1:5200`)
+
+### Admin UI mode (GM-only DB dashboard)
+
+```bash
+# Start the game server first
+bun run server
+
+# Start admin UI (default port 5174)
+bun run client:admin-ui
+```
+
+Open:
+- default: `http://127.0.0.1:5174`
+- login requires GM character username + claimed account password
+- env overrides:
+  - `GAME_SERVER_URL` (default `http://127.0.0.1:5200`)
+  - `ADMIN_UI_HOST` (default `127.0.0.1`)
+  - `ADMIN_UI_PORT` (default `5174`)
 
 Current debug-client capabilities:
 - loads map data directly from `resources/` (no server gameplay backend required)

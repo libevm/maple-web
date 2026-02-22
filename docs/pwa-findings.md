@@ -28,6 +28,30 @@ The docs UI includes sidebar navigation for markdown files under `docs/`.
 
 ---
 
+## 2026-02-22 12:06 (GMT+11) — Admin UI implementation started (`client:admin-ui` + `/api/admin/*`)
+
+### Summary
+Implemented the first admin-ui delivery slice:
+- new command: `bun run client:admin-ui`
+- new admin frontend: `client/admin-ui/index.html`
+- new proxy dev server: `tools/dev/serve-admin-ui.mjs`
+- server-integrated admin API: `server/src/admin-api.ts` wired into `bun run server`
+
+### Backend features now live
+- GM-only username/password login: `POST /api/admin/auth/login`
+- Bearer admin session endpoints: `/api/admin/auth/me`, `/api/admin/auth/logout`
+- Protected DB admin routes:
+  - `/api/admin/tables`
+  - `/api/admin/table/:table/schema|rows|count`
+  - `/api/admin/table/:table/insert|update|delete`
+  - `/api/admin/query` (read-only SQL guard)
+- DB admin sessions persisted in SQLite via new `admin_sessions` table.
+
+### Validation
+- `bun run server` starts successfully with admin API integrated.
+- `bun run client:admin-ui` serves dashboard and proxies `/api/admin/*`.
+- Unauthorized `/api/admin/*` requests return `401` as expected.
+
 ## 2026-02-22 11:49 (GMT+11) — Admin UI implementation planning (`client:admin-ui` + server admin API)
 
 ### Summary

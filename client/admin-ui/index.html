@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shlop Admin UI</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #0b1020; color: #e2e8f0; }
+    .hidden { display: none !important; }
+    .login-wrap { min-height: 100vh; display: grid; place-items: center; }
+    .card { width: min(420px, 92vw); background: #0f172a; border: 1px solid #25314f; border-radius: 12px; padding: 16px; }
+    .card h1 { margin: 0 0 8px; font-size: 18px; }
+    .muted { color: #94a3b8; font-size: 12px; }
+    input, button, textarea { background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: 8px; }
+    button { cursor: pointer; }
+    button.primary { background: #1d4ed8; border-color: #2563eb; }
+    .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+    .row input { flex: 1; }
+    .error { color: #fda4af; font-size: 12px; min-height: 1.2em; margin-top: 8px; }
+
+    .app { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }
+    .sidebar { border-right: 1px solid #1f2a44; padding: 12px; background: #0d1328; }
+    .table-list { display: flex; flex-direction: column; gap: 6px; max-height: calc(100vh - 180px); overflow: auto; margin-top: 10px; }
+    .table-btn { text-align: left; border: 1px solid #25314f; background: #101936; color: #dbeafe; padding: 8px; border-radius: 8px; cursor: pointer; }
+    .table-btn.active { border-color: #60a5fa; background: #132448; }
+    .main { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border: 1px solid #25314f; padding: 6px; vertical-align: top; max-width: 240px; overflow-wrap: anywhere; }
+    th { background: #111d3a; position: sticky; top: 0; }
+    .table-wrap { overflow: auto; border: 1px solid #25314f; border-radius: 10px; max-height: 58vh; }
+    pre { margin: 0; font-size: 12px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <section id="login" class="login-wrap">
+    <div class="card">
+      <h1>Shlop Admin UI</h1>
+      <div class="muted">GM-only login</div>
+      <div class="row"><input id="username" placeholder="GM username" autocomplete="username" /></div>
+      <div class="row"><input id="password" type="password" placeholder="Password" autocomplete="current-password" /></div>
+      <div class="row"><button id="loginBtn" class="primary">Login</button></div>
+      <div id="loginError" class="error"></div>
+    </div>
+  </section>
+
+  <section id="app" class="app hidden">
+    <aside class="sidebar">
+      <div><b>Shlop DB Admin</b></div>
+      <div class="muted" id="whoami"></div>
+      <div class="row">
+        <button id="refreshTables">Refresh</button>
+        <button id="logoutBtn">Logout</button>
+      </div>
+      <div id="tableList" class="table-list"></div>
+    </aside>
+
+    <main class="main">
+      <div class="toolbar">
+        <b id="tableTitle">No table selected</b>
+        <button id="refreshRows">Refresh rows</button>
+        <button id="insertRow" class="primary">Insert row</button>
+        <input id="search" placeholder="Search current table..." />
+        <label class="muted">Limit <input id="limit" type="number" min="1" max="500" value="100" style="width:80px" /></label>
+        <label class="muted">Offset <input id="offset" type="number" min="0" value="0" style="width:80px" /></label>
+      </div>
+      <div class="muted" id="meta"></div>
+      <div class="table-wrap">
+        <table>
+          <thead id="thead"></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div class="toolbar">
+        <input id="sql" style="min-width:420px;flex:1" placeholder="Read-only SQL (SELECT / PRAGMA / EXPLAIN)..." />
+        <button id="runSql">Run SQL</button>
+      </div>
+      <pre id="sqlOut" class="muted"></pre>
+    </main>
+  </section>
+
+  <script>
+    const TOKEN_KEY = "maple.admin.token";
+    const state = { token: localStorage.getItem(TOKEN_KEY) || "", table: null, tables: [], columns: [], rows: [], total: 0, username: "" };
+    const $ = (id) => document.getElementById(id);
+
+    async function api(path, init = {}) {
+      const headers = { "Content-Type": "application/json", ...(init.headers || {}) };
+      if (state.token) headers.Authorization = "Bearer " + state.token;
+      const res = await fetch(path, { ...init, headers });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) throw new Error(data?.error?.message || ("HTTP " + res.status));
+      return data;
+    }
+
+    async function tryResume() {
+      if (!state.token) return false;
+      try {
+        const me = await api("/api/admin/auth/me");
+        state.username = me.user.username;
+        showApp();
+        await loadTables();
+        return true;
+      } catch {
+        localStorage.removeItem(TOKEN_KEY);
+        state.token = "";
+        return false;
+      }
+    }
+
+    function showApp() {
+      $("login").classList.add("hidden");
+      $("app").classList.remove("hidden");
+      $("whoami").textContent = "Logged in as " + state.username;
+    }
+
+    function showLogin() {
+      $("app").classList.add("hidden");
+      $("login").classList.remove("hidden");
+    }
+
+    async function doLogin() {
+      const username = $("username").value.trim();
+      const password = $("password").value;
+      $("loginError").textContent = "";
+      try {
+        const res = await api("/api/admin/auth/login", { method: "POST", body: JSON.stringify({ username, password }) });
+        state.token = res.token;
+        state.username = res.username;
+        localStorage.setItem(TOKEN_KEY, state.token);
+        showApp();
+        await loadTables();
+      } catch (e) {
+        $("loginError").textContent = e.message;
+      }
+    }
+
+    async function doLogout() {
+      try { await api("/api/admin/auth/logout", { method: "POST", body: "{}" }); } catch {}
+      localStorage.removeItem(TOKEN_KEY);
+      state.token = "";
+      state.username = "";
+      showLogin();
+    }
+
+    function renderTables() {
+      const root = $("tableList");
+      root.innerHTML = "";
+      for (const t of state.tables) {
+        const b = document.createElement("button");
+        b.className = "table-btn" + (state.table === t ? " active" : "");
+        b.textContent = t;
+        b.onclick = () => loadTable(t);
+        root.appendChild(b);
+      }
+    }
+
+    function renderRows() {
+      $("tableTitle").textContent = state.table || "No table selected";
+      $("meta").textContent = state.table ? (state.total + " row(s) total • showing " + state.rows.length) : "";
+      const thead = $("thead");
+      const tbody = $("tbody");
+      thead.innerHTML = "";
+      tbody.innerHTML = "";
+      if (!state.table) return;
+
+      const trh = document.createElement("tr");
+      const actionTh = document.createElement("th");
+      actionTh.textContent = "Actions";
+      trh.appendChild(actionTh);
+      for (const c of state.columns) {
+        const th = document.createElement("th");
+        th.textContent = c.name + (c.pk ? " 🔑" : "");
+        trh.appendChild(th);
+      }
+      thead.appendChild(trh);
+
+      for (const row of state.rows) {
+        const tr = document.createElement("tr");
+        const actionTd = document.createElement("td");
+
+        const editBtn = document.createElement("button");
+        editBtn.textContent = "Edit";
+        editBtn.onclick = async () => {
+          const current = {};
+          for (const c of state.columns) current[c.name] = row[c.name];
+          const raw = prompt("Edit row JSON", JSON.stringify(current, null, 2));
+          if (!raw) return;
+          try {
+            const changes = JSON.parse(raw);
+            await api("/api/admin/table/" + encodeURIComponent(state.table) + "/update", {
+              method: "POST",
+              body: JSON.stringify({ original: row, changes }),
+            });
+            await loadRows();
+          } catch (e) {
+            alert("Update failed: " + e.message);
+          }
+        };
+
+        const delBtn = document.createElement("button");
+        delBtn.textContent = "Delete";
+        delBtn.onclick = async () => {
+          if (!confirm("Delete this row?")) return;
+          try {
+            await api("/api/admin/table/" + encodeURIComponent(state.table) + "/delete", {
+              method: "POST",
+              body: JSON.stringify({ original: row }),
+            });
+            await loadRows();
+          } catch (e) {
+            alert("Delete failed: " + e.message);
+          }
+        };
+
+        actionTd.appendChild(editBtn);
+        actionTd.appendChild(document.createTextNode(" "));
+        actionTd.appendChild(delBtn);
+        tr.appendChild(actionTd);
+
+        for (const c of state.columns) {
+          const td = document.createElement("td");
+          const value = row[c.name];
+          td.textContent = value === null ? "NULL" : (typeof value === "object" ? JSON.stringify(value) : String(value));
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function loadTables() {
+      const res = await api("/api/admin/tables");
+      state.tables = res.tables;
+      if (!state.table && state.tables.length > 0) state.table = state.tables[0];
+      renderTables();
+      if (state.table) await loadTable(state.table);
+    }
+
+    async function loadTable(table) {
+      state.table = table;
+      renderTables();
+      const schema = await api("/api/admin/table/" + encodeURIComponent(table) + "/schema");
+      state.columns = schema.columns;
+      await loadRows();
+    }
+
+    async function loadRows() {
+      if (!state.table) return;
+      const search = $("search").value.trim();
+      const limit = Number($("limit").value || "100");
+      const offset = Number($("offset").value || "0");
+      const qs = new URLSearchParams({ limit: String(limit), offset: String(offset), search });
+      const res = await api("/api/admin/table/" + encodeURIComponent(state.table) + "/rows?" + qs.toString());
+      state.rows = res.rows;
+      state.total = res.total;
+      renderRows();
+    }
+
+    $("loginBtn").onclick = doLogin;
+    $("password").onkeydown = (e) => { if (e.key === "Enter") doLogin(); };
+    $("logoutBtn").onclick = doLogout;
+    $("refreshTables").onclick = () => loadTables();
+    $("refreshRows").onclick = () => loadRows();
+    $("search").onkeydown = (e) => { if (e.key === "Enter") loadRows(); };
+    $("limit").onchange = () => loadRows();
+    $("offset").onchange = () => loadRows();
+
+    $("insertRow").onclick = async () => {
+      if (!state.table) return;
+      const raw = prompt("Insert row JSON", "{}");
+      if (!raw) return;
+      try {
+        const values = JSON.parse(raw);
+        await api("/api/admin/table/" + encodeURIComponent(state.table) + "/insert", {
+          method: "POST",
+          body: JSON.stringify({ values }),
+        });
+        await loadRows();
+      } catch (e) {
+        alert("Insert failed: " + e.message);
+      }
+    };
+
+    $("runSql").onclick = async () => {
+      const sql = $("sql").value.trim();
+      if (!sql) return;
+      try {
+        const res = await api("/api/admin/query", { method: "POST", body: JSON.stringify({ sql }) });
+        $("sqlOut").textContent = JSON.stringify(res, null, 2);
+      } catch (e) {
+        $("sqlOut").textContent = "Error: " + e.message;
+      }
+    };
+
+    (async () => {
+      const resumed = await tryResume();
+      if (!resumed) showLogin();
+    })();
+  </script>
+</body>
+</html>

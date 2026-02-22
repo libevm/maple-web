@@ -128,6 +128,56 @@ Used by `POST /api/character/save`, `GET /api/character/load`, and localStorage.
 - **200:** `{ "ok": true }`
 - **409:** `{ "ok": false, "error": { "code": "NAME_TAKEN" } }`
 
+### `POST /api/admin/auth/login`
+- **No gameplay auth required**
+- **Body:** `{ "username": "string", "password": "string" }`
+- **200:** `{ "ok": true, "token": "opaque bearer token", "username": "GMName", "expires_at": "ISO" }`
+- **401:** `{ "ok": false, "error": { "code": "INVALID_CREDENTIALS" } }`
+- **403:** `{ "ok": false, "error": { "code": "GM_ONLY" } }`
+
+### `GET /api/admin/auth/me`
+- **Header:** `Authorization: Bearer <admin_token>`
+- **200:** `{ "ok": true, "user": { "username": "GMName", "expires_at": "ISO" } }`
+- **401:** missing/expired token
+
+### `POST /api/admin/auth/logout`
+- **Header:** `Authorization: Bearer <admin_token>`
+- **200:** `{ "ok": true }`
+
+### `GET /api/admin/tables`
+- **Header:** `Authorization: Bearer <admin_token>`
+- **200:** `{ "ok": true, "tables": ["characters", "sessions", ...] }`
+
+### `GET /api/admin/table/:table/schema`
+- **Header:** `Authorization: Bearer <admin_token>`
+- **200:** `{ "ok": true, "table": "characters", "columns": [...], "foreignKeys": [...], "indexes": [...] }`
+
+### `GET /api/admin/table/:table/rows`
+- **Header:** `Authorization: Bearer <admin_token>`
+- **Query:** `limit`, `offset`, `search`
+- **200:** `{ "ok": true, "table": "characters", "total": 123, "rows": [...] }`
+
+### `GET /api/admin/table/:table/count`
+- **Header:** `Authorization: Bearer <admin_token>`
+- **200:** `{ "ok": true, "table": "characters", "total": 123 }`
+
+### `POST /api/admin/table/:table/insert`
+- **Header:** `Authorization: Bearer <admin_token>`
+- **Body:** `{ "values": { "col": "value" } }`
+
+### `POST /api/admin/table/:table/update`
+- **Header:** `Authorization: Bearer <admin_token>`
+- **Body:** `{ "original": { ... }, "changes": { ... } }`
+
+### `POST /api/admin/table/:table/delete`
+- **Header:** `Authorization: Bearer <admin_token>`
+- **Body:** `{ "original": { ... } }`
+
+### `POST /api/admin/query`
+- **Header:** `Authorization: Bearer <admin_token>`
+- **Body:** `{ "sql": "SELECT ..." }`
+- **Guard:** only `SELECT`, `PRAGMA`, `EXPLAIN` allowed.
+
 ---
 
 ## WebSocket Protocol

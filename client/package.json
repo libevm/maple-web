@@ -14,7 +14,8 @@
     "web": "bun run css && bun run ../tools/dev/serve-client-offline.mjs",
     "offline": "bun run css && bun run ../tools/dev/serve-client-offline.mjs",
     "online": "bun run css && bun run ../tools/dev/serve-client-online.mjs",
-    "online:prod": "bun run css && bun run ../tools/dev/serve-client-online.mjs --prod"
+    "online:prod": "bun run css && bun run ../tools/dev/serve-client-online.mjs --prod",
+    "admin-ui": "bun run ../tools/dev/serve-admin-ui.mjs"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.2.0",

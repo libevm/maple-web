@@ -51,6 +51,13 @@
   - Path traversal hardened (null byte rejection, normalize check)
   - No stack traces in error responses
 
+### Admin UI (`bun run client:admin-ui`)
+- Serves `client/admin-ui/` as a dedicated GM dashboard frontend
+- Proxies `/api/admin/*` to the same game server (`GAME_SERVER_URL`, default `http://127.0.0.1:5200`)
+- Default port: 5174 (`ADMIN_UI_PORT` override)
+- Requires GM username/password login (claimed account)
+- File: `tools/dev/serve-admin-ui.mjs`
+
 ### Legacy (`bun run client:web`)
 - Alias for `client:offline` (backward compatible)
 
@@ -196,6 +203,29 @@ Failures are caught and logged to console (never crashes the server).
 POST /api/character/claim   Body: { password }      Auth: Bearer <session-id>  → 200/400/409
 GET  /api/character/claimed                          Auth: Bearer <session-id>  → 200 { claimed: bool }
 POST /api/character/login   Body: { name, password } No auth header needed      → 200 { session_id: NEW_UUID } / 401/404
+```
+
+### Admin UI Auth Model (GM-only)
+- Admin UI authenticates with **character username + password** (must be a claimed account).
+- Login verifies:
+  1. password hash in `credentials` table
+  2. GM flag (`characters.gm = 1`)
+- On success, server issues a random bearer token and stores only a token hash in `admin_sessions`.
+- All `/api/admin/*` routes require `Authorization: Bearer <admin-token>`.
+- Sessions expire (default TTL: 8h) and are touched on each authenticated request.
+
+**Admin session table**:
+```sql
+CREATE TABLE admin_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL COLLATE NOCASE,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL,
+  ip TEXT NOT NULL DEFAULT '',
+  user_agent TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX idx_admin_sessions_expires ON admin_sessions (expires_at);
 ```
 
 ---
@@ -357,6 +387,14 @@ POST /api/character/create  Body: { name, gender }  Header: Authorization: Beare
 POST /api/character/save    Body: CharacterSave      Header: Authorization: Bearer <session-id>  → 200
 GET  /api/character/load                             Header: Authorization: Bearer <session-id>  → 200/404
 POST /api/character/name    Body: { name }           Header: Authorization: Bearer <session-id>  → 200/409
+
+POST /api/admin/auth/login  Body: { username, password }                               → 200/401/403
+GET  /api/admin/auth/me     Header: Authorization: Bearer <admin-token>                → 200/401
+POST /api/admin/auth/logout Header: Authorization: Bearer <admin-token>                → 200/401
+GET  /api/admin/tables      Header: Authorization: Bearer <admin-token>                → 200
+GET  /api/admin/table/:t/schema|rows|count Header: Authorization: Bearer <admin-token>
+POST /api/admin/table/:t/insert|update|delete Header: Authorization: Bearer <admin-token>
+POST /api/admin/query       Body: { sql } (SELECT/PRAGMA/EXPLAIN only)
 ```
 
 > Full request/response shapes: **see `.memory/shared-schema.md`**

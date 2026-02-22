@@ -1,7 +1,26 @@
 # .memory Sync Status
 
-Last synced: 2026-02-22T11:49:00+11:00
+Last synced: 2026-02-22T12:06:00+11:00
 Status: ✅ Synced
+
+## 2026-02-22 update (admin-ui implementation started)
+- Added root/client command wiring for admin dashboard:
+  - root `package.json`: `bun run client:admin-ui`
+  - `client/package.json`: `admin-ui` script
+  - new dev server: `tools/dev/serve-admin-ui.mjs` (serves `client/admin-ui`, proxies `/api/admin/*` to game server)
+- Added integrated server admin API support in `bun run server`:
+  - new `server/src/admin-api.ts`
+  - wired into `server/src/server.ts` as `/api/admin/*`
+  - GM-only bearer login via `POST /api/admin/auth/login`
+  - protected session endpoints: `/api/admin/auth/me`, `/api/admin/auth/logout`
+  - table features: list/schema/rows/count/insert/update/delete + read-only SQL query runner
+- Added admin session persistence to SQLite in `server/src/db.ts`:
+  - new `admin_sessions` table + expiry index
+  - helper functions for create/get/touch/revoke/purge
+- Added admin UI frontend at `client/admin-ui/index.html`:
+  - GM login screen (username/password)
+  - table browser/editor + SQL panel using `/api/admin/*`
+- Updated `README.md` with `client:admin-ui` usage and env vars.
 
 ## 2026-02-22 update (admin-ui plan rewrite for `client:admin-ui`)
 - Rewrote `.memory/admin-ui-implementation-plan.md` to match the requested architecture:

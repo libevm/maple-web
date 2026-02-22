@@ -17,6 +17,7 @@
 
 import { initDatabase, resolveSession, loadCharacterData, isGm, getJqLeaderboard, getAllJqLeaderboards, appendLog } from "./db.ts";
 import { handleCharacterRequest } from "./character-api.ts";
+import { createAdminApi } from "./admin-api.ts";
 import { handlePowRequest, initPowTable, isSessionValid, touchSession, purgeExpiredSessions } from "./pow.ts";
 import { RoomManager, handleClientMessage, setDebugMode, setDatabase, persistClientState } from "./ws.ts";
 import type { WSClient, WSClientData } from "./ws.ts";
@@ -37,6 +38,10 @@ export interface ServerConfig {
   compression: boolean;
   /** SQLite database path for character persistence (optional, enables character API) */
   dbPath?: string;
+  /** Enable /api/admin/* endpoints (requires dbPath) */
+  adminUiEnabled?: boolean;
+  /** Admin bearer session TTL in milliseconds */
+  adminSessionTtlMs?: number;
 }
 
 export interface ServerMetrics {
@@ -64,6 +69,8 @@ export const DEFAULT_CONFIG: ServerConfig = {
   debug: false,
   maxBatchSize: 50,
   compression: true,
+  adminUiEnabled: true,
+  adminSessionTtlMs: 8 * 60 * 60 * 1000,
 };
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -304,6 +311,7 @@ function routeRequest(
   ctx: RequestContext,
   db: Database | null,
   roomManager?: RoomManager,
+  adminApi?: ((request: Request, url: URL) => Promise<Response | null>) | null,
 ): Response | Promise<Response> {
   const path = url.pathname;
 
@@ -317,6 +325,14 @@ function routeRequest(
         "Access-Control-Allow-Headers": "Content-Type, Authorization",
         "Access-Control-Max-Age": "86400",
       },
+    });
+  }
+
+  // Admin API (GM-only DB dashboard support)
+  if (adminApi && path.startsWith("/api/admin/")) {
+    return adminApi(request, url).then((resp) => {
+      if (resp) return resp;
+      return errorResponse("NOT_FOUND", `Route not found: ${method} ${path}`, 404, ctx.correlationId);
     });
   }
 
@@ -425,6 +441,10 @@ export function createServer(
     // Initialize character database if dbPath is configured
     const db: Database | null = cfg.dbPath ? initDatabase(cfg.dbPath) : null;
 
+    const adminApi = db && cfg.dbPath && cfg.adminUiEnabled
+      ? createAdminApi(db, { dbPath: cfg.dbPath, sessionTtlMs: cfg.adminSessionTtlMs })
+      : null;
+
     // Initialize PoW session table and start periodic cleanup
     if (db) {
       initPowTable(db);
@@ -478,7 +498,7 @@ export function createServer(
         metrics.requestCount++;
 
         try {
-          const response = await routeRequest(url, method, request, provider, cfg, metrics, ctx, db, roomManager);
+          const response = await routeRequest(url, method, request, provider, cfg, metrics, ctx, db, roomManager, adminApi);
           const elapsed = performance.now() - startTime;
           metrics.totalLatencyMs += elapsed;
 
